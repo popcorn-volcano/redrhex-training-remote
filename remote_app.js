@@ -77,8 +77,14 @@ function selectedPreset() {
   return presets.find((preset) => preset.id === state.selectedPresetId) || presets[0] || normalizePreset({ id: "baseline", name: "Baseline" });
 }
 
-function selectedRun() {
-  return state.snapshot.runs.find((run) => run.id === state.selectedRunId) || state.snapshot.runs[0] || null;
+function selectedRun({ fallback = true } = {}) {
+  const selected = state.snapshot.runs.find((run) => run.id === state.selectedRunId);
+  if (selected) return selected;
+  return fallback ? state.snapshot.runs[0] || null : null;
+}
+
+function selectedHistoryRun() {
+  return selectedRun({ fallback: !state.isPhone });
 }
 
 function setMessage(message, options = {}) {
@@ -150,7 +156,9 @@ async function refresh(options = {}) {
   try {
     state.snapshot = await loadRemoteSnapshot(state.machineId);
     state.snapshot.presets = state.snapshot.presets.map(normalizePreset);
-    if (!state.selectedRunId && state.snapshot.runs[0]) state.selectedRunId = state.snapshot.runs[0].id;
+    if (!state.selectedRunId && state.snapshot.runs[0] && !(state.view === "history" && state.isPhone)) {
+      state.selectedRunId = state.snapshot.runs[0].id;
+    }
     if (!state.snapshot.presets.find((preset) => preset.id === state.selectedPresetId) && state.snapshot.presets[0]) {
         state.selectedPresetId = state.snapshot.presets[0].id;
     }
@@ -532,7 +540,7 @@ function historyView() {
 
 function historyLayout() {
   const runs = filteredRuns();
-  const selected = selectedRun();
+  const selected = selectedHistoryRun();
   const list = runs.map(runCardWithOptionalInlineDetails).join("") || empty("No matching runs.");
   const phoneClass = state.isPhone ? "inline-history" : "";
   return `
@@ -800,6 +808,37 @@ function patchRunCardsInPlace() {
   });
 }
 
+function removeInlineDetails(details) {
+  if (!details) return;
+  details.classList.add("collapsing");
+  details.addEventListener("animationend", () => details.remove(), { once: true });
+}
+
+function syncHistoryAccordion(card) {
+  if (!state.isPhone || state.view !== "history") return false;
+  const wrapper = card?.closest(".run-card-wrap");
+  const runId = card?.dataset.id || "";
+  if (!wrapper || !runId) return false;
+  const wasOpen = state.selectedRunId === runId && Boolean(wrapper.querySelector(".inline-run-details"));
+  const existingDetails = [...document.querySelectorAll(".inline-run-details")];
+
+  if (wasOpen) {
+    existingDetails.forEach(removeInlineDetails);
+    state.selectedRunId = "";
+    patchRunCardsInPlace();
+    return true;
+  }
+
+  existingDetails.forEach((details) => details.remove());
+  state.selectedRunId = runId;
+  patchRunCardsInPlace();
+  const run = state.snapshot.runs.find((item) => item.id === runId);
+  if (run) {
+    wrapper.insertAdjacentHTML("beforeend", `<article class="inline-run-details">${runDetails(run, { context: "inline" })}</article>`);
+  }
+  return true;
+}
+
 function isRunMetadataFocused() {
   return ["run-name", "run-folder", "run-notes"].includes(document.activeElement?.id);
 }
@@ -825,7 +864,7 @@ function patchTeamVideo(run) {
 
 function patchSelectedRunDetails() {
   const details = document.querySelector(".run-details, .inline-run-details");
-  const run = selectedRun();
+  const run = selectedHistoryRun();
   if (!details || !run) return;
 
   if (!details.querySelector("#selected-run-title")) {
@@ -1059,13 +1098,23 @@ document.addEventListener("click", async (event) => {
     if (action === "new-preset") return newPreset();
     if (action === "save-preset") return await savePreset();
     if (action === "select-run") {
-      state.selectedRunId = target.dataset.id;
-      await ensureSelectedVideoSigned();
       if (state.view === "history") {
-        patchHistory({ forceList: true });
+        const opened = !(state.isPhone && state.selectedRunId === target.dataset.id);
+        if (state.isPhone && syncHistoryAccordion(target)) {
+          if (opened) {
+            await ensureSelectedVideoSigned();
+            patchSelectedRunDetails();
+          }
+        } else {
+          state.selectedRunId = target.dataset.id;
+          await ensureSelectedVideoSigned();
+          patchHistory({ forceList: true });
+        }
         patchShellStatus();
         return;
       }
+      state.selectedRunId = target.dataset.id;
+      await ensureSelectedVideoSigned();
       return render();
     }
     if (action === "save-run") return await saveRun();

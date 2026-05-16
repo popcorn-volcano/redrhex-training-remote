@@ -450,6 +450,13 @@ video {
   border-radius: 0 0 8px 8px;
   background: #fff;
   padding: 12px;
+  overflow: hidden;
+  transform-origin: top;
+  animation: history-accordion-open 0.24s ease-out;
+}
+
+.inline-run-details.collapsing {
+  animation: history-accordion-close 0.18s ease-in forwards;
 }
 
 .inline-history .run-card-wrap.active .run-card {
@@ -458,6 +465,34 @@ video {
 
 .inline-run-details .section-head {
   align-items: start;
+}
+
+@keyframes history-accordion-open {
+  from {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    max-height: 1800px;
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes history-accordion-close {
+  from {
+    max-height: 1800px;
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 .subpanel {
@@ -626,7 +661,7 @@ video {
 
 @media (max-width: 720px) {
   body {
-    font-size: 16px;
+    font-size: 16.5px;
   }
 
   .remote-shell {
@@ -727,38 +762,45 @@ video {
   }
 
   .rewards-page {
-    gap: 12px;
+    gap: 14px;
   }
 
   .rewards-rail {
-    margin: 0 -2px;
+    margin: 0 -4px;
+    padding: 14px;
   }
 
   .reward-rail-head {
     align-items: center;
   }
 
+  .reward-rail-head h2 {
+    margin-bottom: 4px;
+  }
+
   .preset-scroll {
     display: flex;
-    gap: 10px;
+    gap: 12px;
     overflow-x: auto;
-    padding: 2px 2px 8px;
+    padding: 4px 2px 10px;
     scroll-snap-type: x proximity;
   }
 
   .preset-button {
-    min-width: min(310px, 82vw);
-    padding: 14px;
+    min-width: min(330px, 86vw);
+    min-height: 74px;
+    padding: 16px;
     scroll-snap-align: start;
+    border-radius: 10px;
   }
 
   .preset-button strong {
-    font-size: 17px;
+    font-size: 18px;
   }
 
   .preset-button small {
-    font-size: 13px;
-    line-height: 1.35;
+    font-size: 14px;
+    line-height: 1.4;
   }
 
   .reward-workspace {
@@ -770,61 +812,97 @@ video {
 
   .reward-head {
     position: sticky;
-    top: 8px;
+    top: 6px;
     z-index: 5;
-    padding: 13px;
+    padding: 15px;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: 10px;
     background: rgba(255, 255, 255, 0.96);
     box-shadow: var(--shadow);
+  }
+
+  .reward-head h2 {
+    font-size: 22px;
+  }
+
+  .reward-head .muted {
+    font-size: 15px;
+    line-height: 1.4;
   }
 
   .reward-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .reward-actions button {
+    min-height: 52px;
   }
 
   .preset-meta-grid {
-    margin-top: 12px;
+    margin-top: 14px;
+    gap: 12px;
   }
 
   .preset-meta-grid label,
   .reward-group {
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--panel);
-    padding: 13px;
-  }
-
-  .reward-group {
     padding: 15px;
   }
 
-  .reward-group h3 {
-    margin-bottom: 12px;
-  }
-
-  .reward-row {
-    gap: 9px;
-    padding-top: 13px;
-  }
-
-  .reward-row strong {
+  .preset-meta-grid label {
     font-size: 16px;
   }
 
+  .preset-meta-grid input,
+  .preset-meta-grid textarea {
+    min-height: 52px;
+    font-size: 16px;
+  }
+
+  .reward-group {
+    padding: 17px;
+  }
+
+  .reward-group h3 {
+    margin-bottom: 14px;
+    font-size: 20px;
+  }
+
+  .reward-row {
+    gap: 12px;
+    padding: 15px 0 0;
+  }
+
+  .reward-row strong {
+    font-size: 18px;
+    line-height: 1.25;
+  }
+
   .reward-row small {
-    font-size: 14px;
-    line-height: 1.4;
+    font-size: 15px;
+    line-height: 1.45;
   }
 
   .reward-row code {
-    font-size: 12px;
+    width: fit-content;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel-soft);
+    padding: 3px 8px;
+    font-size: 12.5px;
   }
 
   .reward-row input {
     width: 100%;
-    min-height: 48px;
-    font-size: 18px;
+    min-height: 58px;
+    border-color: var(--line-strong);
+    background: var(--panel-soft);
+    font-size: 20px;
+    font-weight: 850;
+    text-align: right;
   }
 }

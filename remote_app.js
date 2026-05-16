@@ -84,6 +84,7 @@ function selectedRun({ fallback = true } = {}) {
 }
 
 function selectedHistoryRun() {
+  if (state.folderFilter === "all") return null;
   return selectedRun({ fallback: !state.isPhone });
 }
 
@@ -529,9 +530,71 @@ function filteredRuns() {
   });
 }
 
+function runMatchesSearch(run) {
+  const q = state.runSearch.trim().toLowerCase();
+  if (!q) return true;
+  return `${run.id} ${run.display_name || ""} ${run.status || ""} ${run.folder || ""}`.toLowerCase().includes(q);
+}
+
 function folders() {
   const set = new Set(state.snapshot.runs.map((run) => run.folder).filter(Boolean));
   return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+function folderLabel(folderKey) {
+  return folderKey === "uncategorized" ? "Uncategorized" : folderKey;
+}
+
+function folderRuns(folderKey) {
+  return state.snapshot.runs.filter((run) => {
+    if (folderKey === "uncategorized") return !run.folder;
+    return run.folder === folderKey;
+  });
+}
+
+function folderSummaries() {
+  const summaries = folders().map((folder) => ({
+    key: folder,
+    label: folder,
+    runs: folderRuns(folder),
+  }));
+  const uncategorized = folderRuns("uncategorized");
+  if (uncategorized.length) {
+    summaries.push({ key: "uncategorized", label: "Uncategorized", runs: uncategorized });
+  }
+  const q = state.runSearch.trim().toLowerCase();
+  return summaries
+    .map((folder) => ({
+      ...folder,
+      latest: folder.runs.slice().sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))[0],
+      matches: !q || folder.label.toLowerCase().includes(q) || folder.runs.some(runMatchesSearch),
+    }))
+    .filter((folder) => folder.matches)
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function folderCard(folder) {
+  const completed = folder.runs.filter((run) => run.status === "completed").length;
+  const running = folder.runs.filter((run) => ["running", "stopping"].includes(String(run.status || "").toLowerCase())).length;
+  return `
+    <button class="folder-card" data-action="open-folder" data-folder="${escapeHtml(folder.key)}">
+      <span class="folder-card-top">
+        <strong>${escapeHtml(folder.label)}</strong>
+        <span class="badge">${folder.runs.length} run${folder.runs.length === 1 ? "" : "s"}</span>
+      </span>
+      <small>${running ? `${running} running - ` : ""}${completed} completed</small>
+      <small>Latest ${escapeHtml(formatRelativeTime(folder.latest?.updated_at || folder.latest?.created_at))}</small>
+    </button>
+  `;
+}
+
+function historyBrowserContent() {
+  if (state.folderFilter === "all") {
+    const summaries = folderSummaries();
+    return `<div class="folder-list">${summaries.map(folderCard).join("") || empty("No folders yet. Add a folder name to a run from its details.")}</div>`;
+  }
+  const runs = filteredRuns();
+  return `<div class="run-list">${runs.map(runCardWithOptionalInlineDetails).join("") || empty("No matching runs in this folder.")}</div>`;
 }
 
 function historyView() {
@@ -539,26 +602,28 @@ function historyView() {
 }
 
 function historyLayout() {
-  const runs = filteredRuns();
   const selected = selectedHistoryRun();
-  const list = runs.map(runCardWithOptionalInlineDetails).join("") || empty("No matching runs.");
   const phoneClass = state.isPhone ? "inline-history" : "";
+  const root = state.folderFilter === "all";
+  const currentLabel = root ? "Folders" : folderLabel(state.folderFilter);
+  const folderCount = folderSummaries().length;
   return `
     <section class="history-layout ${phoneClass}">
       <aside class="panel run-list-panel">
         <div class="section-head compact">
-          <h2>History</h2>
+          <div>
+            <h2>History</h2>
+            <p class="muted">${escapeHtml(currentLabel)}</p>
+          </div>
           <button data-action="refresh">Refresh</button>
         </div>
-        <input id="run-search" placeholder="Search runs" value="${escapeHtml(state.runSearch)}">
-        <select id="folder-filter">
-          <option value="all" ${state.folderFilter === "all" ? "selected" : ""}>All runs</option>
-          <option value="uncategorized" ${state.folderFilter === "uncategorized" ? "selected" : ""}>Uncategorized</option>
-          ${folders().map((folder) => `<option value="${escapeHtml(folder)}" ${state.folderFilter === folder ? "selected" : ""}>${escapeHtml(folder)}</option>`).join("")}
-        </select>
-        <div class="run-list">${list}</div>
+        <div class="folder-toolbar">
+          ${root ? `<span>${folderCount} folder${folderCount === 1 ? "" : "s"}</span>` : `<button data-action="open-folder-root">Back to Folders</button><span>${escapeHtml(currentLabel)}</span>`}
+        </div>
+        <input id="run-search" placeholder="${root ? "Search folders and runs" : "Search this folder"}" value="${escapeHtml(state.runSearch)}">
+        <div id="history-browser">${historyBrowserContent()}</div>
       </aside>
-      ${state.isPhone ? "" : `<article class="panel run-details">${selected ? runDetails(selected, { context: "desktop" }) : empty("Select a run.")}</article>`}
+      ${state.isPhone ? "" : `<article class="panel run-details">${selected ? runDetails(selected, { context: "desktop" }) : empty(root ? "Open a folder to see runs." : "Select a run.")}</article>`}
     </section>
   `;
 }
@@ -775,14 +840,14 @@ function patchDashboard() {
 }
 
 function patchRunList() {
-  const list = document.querySelector(".run-list");
-  if (!list) return;
+  const browser = document.querySelector("#history-browser");
+  if (!browser) return;
   const panel = document.querySelector(".run-list-panel");
   const panelScrollTop = panel?.scrollTop || 0;
-  const scrollTop = list.scrollTop;
+  const scrollTop = browser.scrollTop;
   const pageScrollTop = window.scrollY;
-  list.innerHTML = filteredRuns().map(runCardWithOptionalInlineDetails).join("") || empty("No matching runs.");
-  list.scrollTop = scrollTop;
+  browser.innerHTML = historyBrowserContent();
+  browser.scrollTop = scrollTop;
   if (panel) panel.scrollTop = panelScrollTop;
   window.scrollTo({ top: pageScrollTop });
 }
@@ -865,7 +930,11 @@ function patchTeamVideo(run) {
 function patchSelectedRunDetails() {
   const details = document.querySelector(".run-details, .inline-run-details");
   const run = selectedHistoryRun();
-  if (!details || !run) return;
+  if (!details) return;
+  if (!run) {
+    details.innerHTML = empty(state.folderFilter === "all" ? "Open a folder to see runs." : "Select a run.");
+    return;
+  }
 
   if (!details.querySelector("#selected-run-title")) {
     details.innerHTML = runDetails(run);
@@ -896,6 +965,11 @@ function patchSelectedRunDetails() {
 }
 
 function patchHistory({ forceList = false } = {}) {
+  if (state.folderFilter === "all") {
+    patchRunList();
+    patchSelectedRunDetails();
+    return;
+  }
   if (!forceList && state.isPhone && document.querySelector(".inline-run-details")) {
     patchRunCardsInPlace();
     patchSelectedRunDetails();
@@ -1047,6 +1121,17 @@ async function loadVideo(storagePath) {
   }
 }
 
+function openHistoryFolder(folderKey) {
+  state.folderFilter = folderKey || "all";
+  state.selectedRunId = "";
+  if (state.folderFilter !== "all" && !state.isPhone) {
+    const firstRun = filteredRuns()[0];
+    if (firstRun) state.selectedRunId = firstRun.id;
+  }
+  patchHistory({ forceList: true });
+  patchShellStatus();
+}
+
 function render() {
   app.innerHTML = shell();
 }
@@ -1097,6 +1182,8 @@ document.addEventListener("click", async (event) => {
     if (action === "duplicate-preset") return duplicatePreset();
     if (action === "new-preset") return newPreset();
     if (action === "save-preset") return await savePreset();
+    if (action === "open-folder") return openHistoryFolder(target.dataset.folder || "all");
+    if (action === "open-folder-root") return openHistoryFolder("all");
     if (action === "select-run") {
       if (state.view === "history") {
         const opened = !(state.isPhone && state.selectedRunId === target.dataset.id);

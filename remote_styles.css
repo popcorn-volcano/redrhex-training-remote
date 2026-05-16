@@ -401,9 +401,25 @@ video {
 .run-strip,
 .mini-list,
 .run-list,
+.folder-list,
 .preset-list {
   display: grid;
   gap: 9px;
+}
+
+.folder-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.folder-toolbar button {
+  min-height: 36px;
+  padding: 7px 10px;
 }
 
 .run-card-wrap {
@@ -412,6 +428,7 @@ video {
 }
 
 .run-card,
+.folder-card,
 .preset-button {
   display: grid;
   width: 100%;
@@ -423,13 +440,21 @@ video {
 }
 
 .run-card.active,
+.folder-card:hover,
 .preset-button.active {
   border-color: var(--accent);
   background: #eef8f8;
 }
 
-.run-card-top {
+.run-card-top,
+.folder-card-top {
   justify-content: space-between;
+}
+
+.folder-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .history-layout {

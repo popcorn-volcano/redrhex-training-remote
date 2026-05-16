@@ -98,6 +98,11 @@ function setMessage(message, options = {}) {
 }
 
 function setView(view) {
+  if (view === "history") {
+    state.folderFilter = "all";
+    state.selectedRunId = "";
+    state.runSearch = "";
+  }
   state.view = view;
   localStorage.setItem("redrhex_child_view", view);
   render();

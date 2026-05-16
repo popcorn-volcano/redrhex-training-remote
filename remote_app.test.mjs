@@ -14,6 +14,7 @@ import {
   latestVideoArtifact,
   machineState,
   refreshDelayForSnapshot,
+  shouldReplaceVideoPanel,
   slugify,
   videoStateForRun,
 } from "./core.js";
@@ -89,6 +90,23 @@ test("video state distinguishes ready, uploading, recordable, and missing", () =
   assert.equal(videoStateForRun({ id: "run-a" }, [
     { run_id: "run-a", kind: "video", storage_path: "runs/run-a/videos/clip.mp4" },
   ]).state, "ready");
+});
+
+test("video panel patching preserves active playback", () => {
+  assert.equal(shouldReplaceVideoPanel({
+    currentState: "ready",
+    currentStorage: "runs/run-a/videos/clip.mp4",
+    nextState: "ready",
+    nextStorage: "runs/run-a/videos/clip.mp4",
+    isPlaying: true,
+  }), false);
+  assert.equal(shouldReplaceVideoPanel({
+    currentState: "uploading",
+    currentStorage: "",
+    nextState: "ready",
+    nextStorage: "runs/run-a/videos/clip.mp4",
+    isPlaying: false,
+  }), true);
 });
 
 test("slugify returns stable storage-safe ids", () => {

@@ -26,6 +26,7 @@ import {
   machineState,
   normalizePreset,
   refreshDelayForSnapshot,
+  shouldReplaceVideoPanel,
   slugify,
   statusTone,
   videoStateForRun,
@@ -93,7 +94,7 @@ function scheduleRefresh() {
   state.refreshTimer = setTimeout(() => {
     refresh({ silent: true }).catch((error) => {
       state.loadError = friendlyErrorMessage(error);
-      render();
+      patchCurrentView();
       scheduleRefresh();
     });
   }, delay);
@@ -151,7 +152,11 @@ async function refresh(options = {}) {
   } finally {
     state.loading = false;
     state.refreshing = false;
-    render();
+    if (silent && app.querySelector(".nav-tabs")) {
+      patchCurrentView();
+    } else {
+      render();
+    }
     scheduleRefresh();
   }
 }
@@ -204,18 +209,18 @@ function shell() {
         <p class="subcopy">A simplified mother panel for team training, reward tuning, history, and shared results.</p>
       </div>
       <div class="top-status">
-        <span class="badge ${tone}">${escapeHtml(machineState(machine))}</span>
-        <span class="badge">${escapeHtml(role())}</span>
-        ${state.lastUpdated ? `<span class="badge">Updated ${escapeHtml(formatRelativeTime(state.lastUpdated))}</span>` : ""}
-        ${hasActiveRemoteWork(state.snapshot) ? `<span class="badge info">Auto-refresh 3s</span>` : `<span class="badge">Auto-refresh 15s</span>`}
+        <span id="machine-state-badge" class="badge ${tone}">${escapeHtml(machineState(machine))}</span>
+        <span id="role-badge" class="badge">${escapeHtml(role())}</span>
+        <span id="last-updated-badge" class="badge">${state.lastUpdated ? `Updated ${escapeHtml(formatRelativeTime(state.lastUpdated))}` : "Not updated yet"}</span>
+        <span id="refresh-mode-badge" class="badge ${hasActiveRemoteWork(state.snapshot) ? "info" : ""}">${hasActiveRemoteWork(state.snapshot) ? "Auto-refresh 3s" : "Auto-refresh 15s"}</span>
       </div>
     </header>
     <nav class="nav-tabs">
       ${views.map(([id, label]) => `<button class="${state.view === id ? "active" : ""}" data-action="view" data-view="${id}">${label}</button>`).join("")}
     </nav>
-    ${state.message ? `<div class="notice">${escapeHtml(state.message)}</div>` : ""}
-    ${(state.snapshot.schema?.warnings || []).map((warning) => `<div class="notice warning">${escapeHtml(warning)}</div>`).join("")}
-    ${state.loadError ? `<div class="notice danger">${escapeHtml(state.loadError)}</div>` : ""}
+    <div id="message-notice" class="notice" ${state.message ? "" : "hidden"}>${escapeHtml(state.message)}</div>
+    <div id="schema-warnings">${(state.snapshot.schema?.warnings || []).map((warning) => `<div class="notice warning">${escapeHtml(warning)}</div>`).join("")}</div>
+    <div id="load-error-notice" class="notice danger" ${state.loadError ? "" : "hidden"}>${escapeHtml(state.loadError)}</div>
     ${state.user ? page() : loginPage()}
   `;
 }
@@ -263,7 +268,7 @@ function dashboardView() {
           </div>
           <button data-action="refresh">${state.loading ? "Refreshing" : "Refresh"}</button>
         </div>
-        <div class="health-grid">
+        <div id="health-grid" class="health-grid">
           ${healthChecks().map(([, label, ok, detail]) => `
             <div class="health-card ${ok ? "ok" : "warn"}">
               <span>${escapeHtml(label)}</span>
@@ -274,15 +279,15 @@ function dashboardView() {
       </article>
       <article class="panel">
         <h2>Machine</h2>
-        ${machineCard(machine)}
+        <div id="machine-card-slot">${machineCard(machine)}</div>
       </article>
       <article class="panel">
         <h2>Queue</h2>
-        ${jobSummary(jobs)}
+        <div id="queue-summary-slot">${jobSummary(jobs)}</div>
       </article>
       <article class="panel span-2">
         <h2>Latest Runs</h2>
-        <div class="run-strip">${latestRuns.map(runCard).join("") || empty("No runs synced yet.")}</div>
+        <div id="latest-runs-slot" class="run-strip">${latestRuns.map(runCard).join("") || empty("No runs synced yet.")}</div>
       </article>
     </section>
   `;
@@ -445,8 +450,7 @@ function historyView() {
 }
 
 function renderRunListOnly() {
-  const list = document.querySelector(".run-list");
-  if (list) list.innerHTML = filteredRuns().map(runCard).join("") || empty("No matching runs.");
+  patchRunList();
 }
 
 function runCard(run) {
@@ -464,40 +468,44 @@ function runCard(run) {
   `;
 }
 
-function runDetails(run) {
+function runDetailsGrid(run) {
   const video = videoStateForRun(run, state.snapshot.artifacts);
-  const videoArtifact = video.artifact;
-  const signed = videoArtifact ? signedVideoEntry(videoArtifact.storage_path)?.url || "" : "";
-  const draft = currentRunDraft(run);
-  const editable = canEditRun(role());
-  const runnable = canOperate(role()) && Boolean(run.latest_checkpoint);
-  const relatedJobs = state.snapshot.jobs.filter((job) => {
+  return `
+    <div><span>Checkpoint</span><strong>${run.latest_checkpoint ? "ready" : "missing"}</strong></div>
+    <div><span>Video</span><strong>${escapeHtml(video.state)}</strong></div>
+    <div><span>ONNX</span><strong>${run.onnx_path ? "ready" : "missing"}</strong></div>
+    <div><span>Updated</span><strong>${escapeHtml(formatRelativeTime(run.updated_at || run.created_at))}</strong></div>
+  `;
+}
+
+function relatedJobsForRun(run) {
+  return state.snapshot.jobs.filter((job) => {
     const payload = job.payload || {};
     const result = job.result || {};
     return payload.run_id === run.id || result.local_run_id === run.id || result.process_id === run.id;
   }).slice(0, 8);
+}
+
+function relatedJobsSection(run) {
+  const relatedJobs = relatedJobsForRun(run);
   return `
-    <div class="section-head">
-      <div>
-        <h2>${escapeHtml(run.display_name || run.id)}</h2>
-        <p class="muted">${escapeHtml(run.id)}</p>
-      </div>
-      <span class="badge ${statusTone(run.status)}">${escapeHtml(run.status || "unknown")}</span>
-    </div>
-    <div class="details-grid">
-      <div><span>Checkpoint</span><strong>${run.latest_checkpoint ? "ready" : "missing"}</strong></div>
-      <div><span>Video</span><strong>${escapeHtml(video.state)}</strong></div>
-      <div><span>ONNX</span><strong>${run.onnx_path ? "ready" : "missing"}</strong></div>
-      <div><span>Updated</span><strong>${escapeHtml(formatRelativeTime(run.updated_at || run.created_at))}</strong></div>
-    </div>
-    <section class="subpanel">
-      <h3>Run Metadata</h3>
-      <label>Name <input id="run-name" value="${escapeHtml(draft.display_name ?? run.display_name ?? "")}" ${editable ? "" : "disabled"}></label>
-      <label>Folder <input id="run-folder" value="${escapeHtml(draft.folder ?? run.folder ?? "")}" placeholder="e.g. gait tests" ${editable ? "" : "disabled"}></label>
-      <label>Notes <textarea id="run-notes" ${editable ? "" : "disabled"}>${escapeHtml(draft.notes ?? run.notes ?? "")}</textarea></label>
-      <button data-action="save-run" ${editable ? "" : "disabled"}>Save Notes / Folder</button>
+    <section id="related-jobs-panel" class="subpanel">
+      <h3>Related Jobs</h3>
+      ${relatedJobs.length ? `<div class="mini-list">${relatedJobs.map((job) => `
+        <div><strong>${escapeHtml(job.type)}</strong><span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span><small>${escapeHtml(jobQueueLabel(job, state.snapshot.targetMachine || state.snapshot.machine))}</small><small>${escapeHtml(formatRelativeTime(job.created_at))}</small></div>
+      `).join("")}</div>` : empty("No remote jobs linked to this run yet.")}
     </section>
-    <section class="subpanel">
+  `;
+}
+
+function teamVideoSection(run) {
+  const video = videoStateForRun(run, state.snapshot.artifacts);
+  const videoArtifact = video.artifact;
+  const signed = videoArtifact ? signedVideoEntry(videoArtifact.storage_path)?.url || "" : "";
+  const runnable = canOperate(role()) && Boolean(run.latest_checkpoint);
+  const storagePath = videoArtifact?.storage_path || "";
+  return `
+    <section id="team-video-panel" class="subpanel" data-video-state="${escapeHtml(video.state)}" data-storage-path="${escapeHtml(storagePath)}">
       <h3>Team Video</h3>
       ${video.state === "ready" ? `
         ${signed ? `<video controls src="${escapeHtml(signed)}"></video>` : `<p class="muted">Preparing a signed team-only video link...</p>`}
@@ -511,6 +519,32 @@ function runDetails(run) {
         <button class="primary" data-action="job-record-video" ${runnable ? "" : "disabled"}>Record Video</button>
       ` : `<p class="muted">No checkpoint yet, so video recording is not available.</p>`}
     </section>
+  `;
+}
+
+function runDetails(run) {
+  const draft = currentRunDraft(run);
+  const editable = canEditRun(role());
+  const runnable = canOperate(role()) && Boolean(run.latest_checkpoint);
+  return `
+    <div class="section-head">
+      <div>
+        <h2 id="selected-run-title">${escapeHtml(run.display_name || run.id)}</h2>
+        <p id="selected-run-id" class="muted">${escapeHtml(run.id)}</p>
+      </div>
+      <span id="selected-run-status" class="badge ${statusTone(run.status)}">${escapeHtml(run.status || "unknown")}</span>
+    </div>
+    <div id="run-details-grid" class="details-grid">
+      ${runDetailsGrid(run)}
+    </div>
+    <section class="subpanel">
+      <h3>Run Metadata</h3>
+      <label>Name <input id="run-name" value="${escapeHtml(draft.display_name ?? run.display_name ?? "")}" ${editable ? "" : "disabled"}></label>
+      <label>Folder <input id="run-folder" value="${escapeHtml(draft.folder ?? run.folder ?? "")}" placeholder="e.g. gait tests" ${editable ? "" : "disabled"}></label>
+      <label>Notes <textarea id="run-notes" ${editable ? "" : "disabled"}>${escapeHtml(draft.notes ?? run.notes ?? "")}</textarea></label>
+      <button data-action="save-run" ${editable ? "" : "disabled"}>Save Notes / Folder</button>
+    </section>
+    ${teamVideoSection(run)}
     <section class="subpanel">
       <h3>Safe Remote Actions</h3>
       <div class="button-row wrap">
@@ -519,12 +553,7 @@ function runDetails(run) {
         <button data-action="job-stop" ${canOperate(role()) ? "" : "disabled"}>Stop Active Process</button>
       </div>
     </section>
-    <section class="subpanel">
-      <h3>Related Jobs</h3>
-      ${relatedJobs.length ? `<div class="mini-list">${relatedJobs.map((job) => `
-        <div><strong>${escapeHtml(job.type)}</strong><span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span><small>${escapeHtml(jobQueueLabel(job, state.snapshot.targetMachine || state.snapshot.machine))}</small><small>${escapeHtml(formatRelativeTime(job.created_at))}</small></div>
-      `).join("")}</div>` : empty("No remote jobs linked to this run yet.")}
-    </section>
+    ${relatedJobsSection(run)}
   `;
 }
 
@@ -569,6 +598,150 @@ function connectionView() {
 
 function empty(text) {
   return `<p class="muted empty">${escapeHtml(text)}</p>`;
+}
+
+function setTextAndClass(selector, text, className) {
+  const element = document.querySelector(selector);
+  if (!element) return;
+  element.textContent = text;
+  if (className) element.className = className;
+}
+
+function patchShellStatus() {
+  const machine = state.snapshot.targetMachine || state.snapshot.machine;
+  const machineStatus = machineState(machine);
+  setTextAndClass("#machine-state-badge", machineStatus, `badge ${statusTone(machineStatus)}`);
+  setTextAndClass("#role-badge", role(), "badge");
+  setTextAndClass(
+    "#last-updated-badge",
+    state.lastUpdated ? `Updated ${formatRelativeTime(state.lastUpdated)}` : "Not updated yet",
+    "badge",
+  );
+  setTextAndClass(
+    "#refresh-mode-badge",
+    hasActiveRemoteWork(state.snapshot) ? "Auto-refresh 3s" : "Auto-refresh 15s",
+    `badge ${hasActiveRemoteWork(state.snapshot) ? "info" : ""}`.trim(),
+  );
+
+  const message = document.querySelector("#message-notice");
+  if (message) {
+    message.textContent = state.message;
+    message.hidden = !state.message;
+  }
+  const warningSlot = document.querySelector("#schema-warnings");
+  if (warningSlot) {
+    warningSlot.innerHTML = (state.snapshot.schema?.warnings || [])
+      .map((warning) => `<div class="notice warning">${escapeHtml(warning)}</div>`)
+      .join("");
+  }
+  const error = document.querySelector("#load-error-notice");
+  if (error) {
+    error.textContent = state.loadError;
+    error.hidden = !state.loadError;
+  }
+}
+
+function patchDashboard() {
+  const machine = state.snapshot.targetMachine || state.snapshot.machine;
+  const healthGrid = document.querySelector("#health-grid");
+  if (healthGrid) {
+    healthGrid.innerHTML = healthChecks().map(([, label, ok, detail]) => `
+      <div class="health-card ${ok ? "ok" : "warn"}">
+        <span>${escapeHtml(label)}</span>
+        <strong>${ok ? "OK" : "Needs attention"}</strong>
+        <small>${escapeHtml(detail)}</small>
+      </div>`).join("");
+  }
+  const machineSlot = document.querySelector("#machine-card-slot");
+  if (machineSlot) machineSlot.innerHTML = machineCard(machine);
+  const queueSlot = document.querySelector("#queue-summary-slot");
+  if (queueSlot) queueSlot.innerHTML = jobSummary(state.snapshot.jobs.slice(0, 6));
+  const latestRuns = document.querySelector("#latest-runs-slot");
+  if (latestRuns) latestRuns.innerHTML = state.snapshot.runs.slice(0, 5).map(runCard).join("") || empty("No runs synced yet.");
+}
+
+function patchRunList() {
+  const list = document.querySelector(".run-list");
+  if (!list) return;
+  const scrollTop = list.scrollTop;
+  list.innerHTML = filteredRuns().map(runCard).join("") || empty("No matching runs.");
+  list.scrollTop = scrollTop;
+}
+
+function isRunMetadataFocused() {
+  return ["run-name", "run-folder", "run-notes"].includes(document.activeElement?.id);
+}
+
+function patchTeamVideo(run) {
+  const panel = document.querySelector("#team-video-panel");
+  if (!panel || !run) return;
+  const video = videoStateForRun(run, state.snapshot.artifacts);
+  const nextStorage = video.artifact?.storage_path || "";
+  const videoElement = panel.querySelector("video");
+  if (videoElement && panel.dataset.storagePath && !nextStorage) return;
+  const signedReady = Boolean(nextStorage && signedVideoEntry(nextStorage)?.url);
+  const shouldReplace = (video.state === "ready" && signedReady && !videoElement) || shouldReplaceVideoPanel({
+    currentState: panel.dataset.videoState || "",
+    currentStorage: panel.dataset.storagePath || "",
+    nextState: video.state,
+    nextStorage,
+    isPlaying: Boolean(videoElement && !videoElement.paused),
+  });
+  if (!shouldReplace) return;
+  panel.outerHTML = teamVideoSection(run);
+}
+
+function patchSelectedRunDetails() {
+  const details = document.querySelector(".run-details");
+  const run = selectedRun();
+  if (!details || !run) return;
+
+  if (!details.querySelector("#selected-run-title")) {
+    details.innerHTML = runDetails(run);
+    return;
+  }
+
+  const title = document.querySelector("#selected-run-title");
+  if (title) title.textContent = run.display_name || run.id;
+  const id = document.querySelector("#selected-run-id");
+  if (id) id.textContent = run.id;
+  setTextAndClass("#selected-run-status", run.status || "unknown", `badge ${statusTone(run.status)}`);
+
+  const grid = document.querySelector("#run-details-grid");
+  if (grid) grid.innerHTML = runDetailsGrid(run);
+
+  if (!isRunMetadataFocused() && !state.runDrafts[run.id]) {
+    const name = document.querySelector("#run-name");
+    const folder = document.querySelector("#run-folder");
+    const notes = document.querySelector("#run-notes");
+    if (name) name.value = run.display_name || "";
+    if (folder) folder.value = run.folder || "";
+    if (notes) notes.value = run.notes || "";
+  }
+
+  patchTeamVideo(run);
+  const related = document.querySelector("#related-jobs-panel");
+  if (related) related.outerHTML = relatedJobsSection(run);
+}
+
+function patchHistory() {
+  patchRunList();
+  patchSelectedRunDetails();
+}
+
+function patchConnection() {
+  const connectionGrid = document.querySelector(".connection-grid");
+  if (connectionGrid && !["connection-machine-id"].includes(document.activeElement?.id)) {
+    connectionGrid.outerHTML = connectionView();
+  }
+}
+
+function patchCurrentView() {
+  patchShellStatus();
+  if (!state.user) return;
+  if (state.view === "dashboard") patchDashboard();
+  if (state.view === "history") patchHistory();
+  if (state.view === "connection") patchConnection();
 }
 
 function collectRewardValues() {
@@ -687,7 +860,13 @@ async function loadVideo(storagePath) {
     url: await createSignedVideoUrl(storagePath),
     expiresAt: Date.now() + 55 * 60_000,
   };
-  render();
+  const run = selectedRun();
+  if (state.view === "history" && run) {
+    const panel = document.querySelector("#team-video-panel");
+    if (panel) panel.outerHTML = teamVideoSection(run);
+  } else {
+    render();
+  }
 }
 
 function render() {
@@ -791,12 +970,20 @@ boot().catch((error) => {
 });
 
 window.addEventListener("focus", () => {
-  if (state.user) refresh({ silent: true }).catch((error) => setMessage(friendlyErrorMessage(error)));
+  if (state.user) {
+    refresh({ silent: true }).catch((error) => {
+      state.loadError = friendlyErrorMessage(error);
+      patchCurrentView();
+    });
+  }
 });
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && state.user) {
-    refresh({ silent: true }).catch((error) => setMessage(friendlyErrorMessage(error)));
+    refresh({ silent: true }).catch((error) => {
+      state.loadError = friendlyErrorMessage(error);
+      patchCurrentView();
+    });
   } else if (state.refreshTimer) {
     clearTimeout(state.refreshTimer);
   }

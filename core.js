@@ -185,6 +185,17 @@ export function videoStateForRun(run = {}, artifacts = []) {
   return { state: "missing", artifact: null };
 }
 
+export function shouldReplaceVideoPanel({
+  currentState = "",
+  currentStorage = "",
+  nextState = "",
+  nextStorage = "",
+  isPlaying = false,
+} = {}) {
+  if (isPlaying && currentStorage && currentStorage === nextStorage) return false;
+  return currentState !== nextState || currentStorage !== nextStorage;
+}
+
 export function buildRunMetadataPatch({ displayName = "", folder = "", notes = "", now = new Date() } = {}) {
   const nameValue = String(displayName || "").trim();
   const folderValue = String(folder || "").trim();

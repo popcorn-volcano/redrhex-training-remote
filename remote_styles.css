@@ -13,7 +13,51 @@
   --info: #2a63b7;
   --warn: #a95d16;
   --bad: #b33a36;
+  --field: #ffffff;
+  --disabled-bg: #edf2f0;
+  --disabled-text: #93a09e;
+  --nav-bg: rgba(255, 255, 255, 0.72);
+  --notice-border: #b8d5dc;
+  --notice-bg: #eaf7fa;
+  --notice-text: #174e59;
+  --danger-bg: #fff0ef;
+  --warning-bg: #fff7e8;
+  --accent-soft: #eef8f8;
+  --accent-wash: #edf8f6;
+  --hero-bg: linear-gradient(135deg, #ffffff, #eef7f3);
+  --video-bg: #0d1716;
   --shadow: 0 14px 40px rgba(25, 42, 40, 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1110;
+  --panel: #121a18;
+  --panel-soft: #192522;
+  --line: #2a3a36;
+  --line-strong: #435650;
+  --text: #edf7f4;
+  --muted: #9aada8;
+  --accent: #55bfd0;
+  --accent-strong: #86dceb;
+  --good: #68d493;
+  --info: #82adff;
+  --warn: #f0b467;
+  --bad: #ff827d;
+  --field: #0e1715;
+  --disabled-bg: #18221f;
+  --disabled-text: #70837e;
+  --nav-bg: rgba(18, 26, 24, 0.82);
+  --notice-border: #2f6872;
+  --notice-bg: #10282d;
+  --notice-text: #a5edf8;
+  --danger-bg: #2a1515;
+  --warning-bg: #2a2110;
+  --accent-soft: #122a2e;
+  --accent-wash: #102326;
+  --hero-bg: linear-gradient(135deg, #151f1d, #102528);
+  --video-bg: #050807;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
 }
 * {
   box-sizing: border-box;
@@ -47,7 +91,7 @@ select,
 textarea {
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fff;
+  background: var(--field);
   color: var(--text);
 }
 
@@ -65,9 +109,9 @@ button:hover:not(:disabled) {
 }
 
 button:disabled {
-  color: #93a09e;
+  color: var(--disabled-text);
   cursor: not-allowed;
-  background: #edf2f0;
+  background: var(--disabled-bg);
 }
 
 input,
@@ -153,7 +197,7 @@ h3 {
 }
 
 code {
-  color: #4c5b59;
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -163,7 +207,7 @@ video {
   max-height: 460px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #0d1716;
+  background: var(--video-bg);
 }
 
 .remote-shell {
@@ -192,6 +236,40 @@ video {
 .top-status,
 .button-row.wrap {
   flex-wrap: wrap;
+}
+
+.theme-toggle {
+  border-color: var(--line);
+  background: var(--field);
+  color: var(--text);
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.welcome-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--hero-bg);
+  box-shadow: var(--shadow);
+}
+
+.welcome-banner h2 {
+  margin-bottom: 5px;
+  font-size: clamp(19px, 2.3vw, 26px);
+}
+
+.welcome-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .section-head {
@@ -224,7 +302,7 @@ video {
   margin-bottom: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--nav-bg);
 }
 
 .nav-tabs button {
@@ -253,22 +331,22 @@ video {
 .notice {
   margin: 0 0 14px;
   padding: 11px 13px;
-  border: 1px solid #b8d5dc;
+  border: 1px solid var(--notice-border);
   border-radius: 8px;
-  background: #eaf7fa;
-  color: #174e59;
+  background: var(--notice-bg);
+  color: var(--notice-text);
   font-weight: 700;
 }
 
 .notice.danger {
   border-color: #e8b5b3;
-  background: #fff0ef;
+  background: var(--danger-bg);
   color: var(--bad);
 }
 
 .notice.warning {
   border-color: #e7c590;
-  background: #fff7e8;
+  background: var(--warning-bg);
   color: var(--warn);
 }
 
@@ -387,7 +465,7 @@ video {
 }
 
 .intro-panel {
-  background: linear-gradient(135deg, #ffffff, #eef7f3);
+  background: var(--hero-bg);
 }
 
 .health-grid,
@@ -490,7 +568,7 @@ video {
   min-height: 48px;
   padding: 8px 11px;
   border-color: var(--accent);
-  background: #fff;
+  background: var(--field);
   color: var(--accent-strong);
 }
 
@@ -500,7 +578,7 @@ video {
   width: 28px;
   height: 28px;
   border-radius: 999px;
-  background: #e3f3f1;
+  background: var(--accent-soft);
   color: var(--accent-strong);
   font-weight: 900;
 }
@@ -526,7 +604,7 @@ video {
   padding: 12px;
   text-align: left;
   border-color: rgba(31, 122, 140, 0.34);
-  background: linear-gradient(135deg, #ffffff, #edf8f6);
+  background: linear-gradient(135deg, var(--panel), var(--accent-wash));
 }
 
 .folder-return-card span:last-child {
@@ -546,7 +624,7 @@ video {
   flex: 0 0 36px;
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: white;
   font-size: 20px;
   font-weight: 900;
 }
@@ -565,14 +643,14 @@ video {
   padding: 11px;
   text-align: left;
   border-color: var(--line);
-  background: #fff;
+  background: var(--field);
 }
 
 .run-card.active,
 .folder-card:hover,
 .preset-button.active {
   border-color: var(--accent);
-  background: #eef8f8;
+  background: var(--accent-soft);
 }
 
 .preset-button.draft-preset {
@@ -605,7 +683,7 @@ video {
   gap: 16px;
   border: 1px solid rgba(31, 122, 140, 0.28);
   border-radius: 10px;
-  background: linear-gradient(135deg, #ffffff, #edf8f6);
+  background: linear-gradient(135deg, var(--panel), var(--accent-wash));
   box-shadow: var(--shadow);
   padding: 12px;
 }
@@ -616,7 +694,7 @@ video {
   gap: 9px;
   min-height: 44px;
   border-color: var(--accent);
-  background: #fff;
+  background: var(--field);
   color: var(--accent-strong);
 }
 
@@ -627,7 +705,7 @@ video {
   height: 26px;
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: white;
   font-weight: 900;
 }
 
@@ -667,7 +745,7 @@ video {
   border: 1px solid var(--accent);
   border-top: 0;
   border-radius: 0 0 8px 8px;
-  background: #fff;
+  background: var(--panel);
   padding: 12px;
   overflow: hidden;
   transform-origin: top;
@@ -997,6 +1075,17 @@ video {
     gap: 6px;
   }
 
+  .welcome-banner,
+  .welcome-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-content: stretch;
+  }
+
+  .welcome-banner {
+    padding: 14px;
+  }
+
   .nav-tabs {
     margin: 0 -4px 12px;
     border-radius: 7px;
@@ -1172,7 +1261,7 @@ video {
     padding: 15px;
     border: 1px solid var(--line);
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.96);
+    background: var(--panel);
     box-shadow: var(--shadow);
   }
 

@@ -46,13 +46,26 @@ import {
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
   : { matches: false, addEventListener: null, addListener: null };
+const THEME_KEY = "redrhex_to_go_theme";
+const VIEW_IDS = ["train", "rewards", "history", "connection", "dashboard"];
+
+function initialView() {
+  const stored = localStorage.getItem("redrhex_child_view");
+  return VIEW_IDS.includes(stored) ? stored : "train";
+}
+
+function preferredTheme() {
+  const stored = localStorage.getItem(THEME_KEY);
+  if (stored === "light" || stored === "dark") return stored;
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
 
 const TEXT_AUTOSAVE_DELAY_MS = 350;
 
 const state = {
   user: null,
   profile: null,
-  view: localStorage.getItem("redrhex_child_view") || "dashboard",
+  view: initialView(),
   machineId: localStorage.getItem("redrhex_machine_id") || DEFAULT_MACHINE_ID,
   snapshot: {
     machines: [],
@@ -101,9 +114,11 @@ const state = {
   refreshTimer: null,
   refreshing: false,
   isPhone: PHONE_MEDIA.matches,
+  theme: preferredTheme(),
 };
 
 const app = document.querySelector("#app");
+document.documentElement.dataset.theme = state.theme;
 
 function role() {
   return state.profile?.role || "viewer";
@@ -160,6 +175,17 @@ function setMessage(message, options = {}) {
   } else {
     patchShellStatus();
   }
+}
+
+function setTheme(theme) {
+  state.theme = theme === "dark" ? "dark" : "light";
+  localStorage.setItem(THEME_KEY, state.theme);
+  document.documentElement.dataset.theme = state.theme;
+  patchShellStatus();
+}
+
+function toggleTheme() {
+  setTheme(state.theme === "dark" ? "light" : "dark");
 }
 
 function setView(view) {
@@ -339,12 +365,12 @@ function healthChecks() {
 
 function shell() {
   const views = [
-    ["dashboard", "Dashboard"],
     ["train", "Train"],
     ["rewards", "Rewards"],
     ["terrain", "Terrain"],
     ["history", "History"],
     ["connection", "Connection"],
+    ["dashboard", "Dashboard"],
   ];
   const machine = state.snapshot.targetMachine || state.snapshot.machine;
   const tone = statusTone(machineState(machine));
@@ -360,6 +386,7 @@ function shell() {
         <span id="role-badge" class="badge">${escapeHtml(role())}</span>
         <span id="last-updated-badge" class="badge">${state.lastUpdated ? `Updated ${escapeHtml(formatRelativeTime(state.lastUpdated))}` : "Not updated yet"}</span>
         <span id="refresh-mode-badge" class="badge ${hasActiveRemoteWork(state.snapshot) ? "info" : ""}">${hasActiveRemoteWork(state.snapshot) ? "Auto-refresh 3s" : "Auto-refresh 15s"}</span>
+        <button class="theme-toggle" data-action="toggle-theme">${state.theme === "dark" ? "Light Mode" : "Dark Mode"}</button>
       </div>
     </header>
     <nav class="nav-tabs">
@@ -368,7 +395,34 @@ function shell() {
     <div id="message-notice" class="notice" ${state.message ? "" : "hidden"}>${escapeHtml(state.message)}</div>
     <div id="schema-warnings">${(state.snapshot.schema?.warnings || []).map((warning) => `<div class="notice warning">${escapeHtml(warning)}</div>`).join("")}</div>
     <div id="load-error-notice" class="notice danger" ${state.loadError ? "" : "hidden"}>${escapeHtml(state.loadError)}</div>
+    ${state.user ? welcomeBanner() : ""}
     ${state.user ? page() : loginPage()}
+  `;
+}
+
+function welcomeBanner() {
+  const machine = state.snapshot.targetMachine || state.snapshot.machine;
+  const displayName = state.profile?.display_name || state.user?.email?.split("@")[0] || "teammate";
+  const machineStatus = machineState(machine);
+  const readyText = machineStatus === "ready"
+    ? "Mother is ready for the next run."
+    : machineStatus === "busy"
+      ? "Mother is busy, but you can still prepare the next job."
+      : machineStatus === "paused"
+        ? "Remote launch is paused in mother."
+        : "Check Connection to verify the remote link.";
+  return `
+    <section class="welcome-banner">
+      <div>
+        <p class="eyebrow">Welcome</p>
+        <h2>Hi ${escapeHtml(displayName)}, where should RedRHex go next?</h2>
+        <p class="subcopy">${escapeHtml(readyText)}</p>
+      </div>
+      <div class="welcome-actions">
+        <button class="primary" data-action="view" data-view="train">Start Training</button>
+        <button data-action="view" data-view="history">View History</button>
+      </div>
+    </section>
   `;
 }
 
@@ -1164,6 +1218,8 @@ function patchShellStatus() {
     hasActiveRemoteWork(state.snapshot) ? "Auto-refresh 3s" : "Auto-refresh 15s",
     `badge ${hasActiveRemoteWork(state.snapshot) ? "info" : ""}`.trim(),
   );
+  const themeToggle = document.querySelector(".theme-toggle");
+  if (themeToggle) themeToggle.textContent = state.theme === "dark" ? "Light Mode" : "Dark Mode";
 
   const message = document.querySelector("#message-notice");
   if (message) {
@@ -2006,6 +2062,7 @@ document.addEventListener("click", async (event) => {
   event.preventDefault();
   const action = target.dataset.action;
   try {
+    if (action === "toggle-theme") return toggleTheme();
     if (action === "view") return setView(target.dataset.view);
     if (action === "login") return await handleLogin();
     if (action === "refresh") return await refresh({ silent: true });

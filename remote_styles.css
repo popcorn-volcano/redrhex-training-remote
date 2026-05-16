@@ -28,6 +28,12 @@ body {
   font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 button,
 input,
 select,
@@ -763,11 +769,19 @@ video {
 
   .rewards-page {
     gap: 14px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
   }
 
   .rewards-rail {
-    margin: 0 -4px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
     padding: 14px;
+    overflow: hidden;
   }
 
   .reward-rail-head {
@@ -781,13 +795,21 @@ video {
   .preset-scroll {
     display: flex;
     gap: 12px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     overflow-x: auto;
+    overflow-y: hidden;
     padding: 4px 2px 10px;
     scroll-snap-type: x proximity;
+    scrollbar-width: thin;
   }
 
   .preset-button {
-    min-width: min(330px, 86vw);
+    flex: 0 0 min(320px, calc(100vw - 56px));
+    width: auto;
+    min-width: 0;
+    max-width: calc(100vw - 56px);
     min-height: 74px;
     padding: 16px;
     scroll-snap-align: start;
@@ -804,6 +826,9 @@ video {
   }
 
   .reward-workspace {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     padding: 0;
     border: 0;
     background: transparent;
@@ -814,6 +839,9 @@ video {
     position: sticky;
     top: 6px;
     z-index: 5;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     padding: 15px;
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -834,6 +862,7 @@ video {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
+    min-width: 0;
   }
 
   .reward-actions button {
@@ -843,10 +872,16 @@ video {
   .preset-meta-grid {
     margin-top: 14px;
     gap: 12px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .preset-meta-grid label,
   .reward-group {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     border: 1px solid var(--line);
     border-radius: 10px;
     background: var(--panel);
@@ -873,8 +908,15 @@ video {
   }
 
   .reward-row {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     gap: 12px;
     padding: 15px 0 0;
+  }
+
+  .reward-row span {
+    min-width: 0;
   }
 
   .reward-row strong {
@@ -889,6 +931,10 @@ video {
 
   .reward-row code {
     width: fit-content;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     border: 1px solid var(--line);
     border-radius: 999px;
     background: var(--panel-soft);

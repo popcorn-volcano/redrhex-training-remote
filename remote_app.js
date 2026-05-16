@@ -4,6 +4,7 @@ import {
   currentUser,
   insert,
   loadRemoteSnapshot,
+  remove,
   select,
   signIn,
   signOut,
@@ -12,6 +13,8 @@ import {
 } from "./api.js";
 import {
   REWARD_FIELDS,
+  TERRAIN_DEFAULT_VALUES,
+  TERRAIN_FIELDS,
   buildRunMetadataPatch,
   buildActionJob,
   buildTrainingJob,
@@ -25,10 +28,15 @@ import {
   jobQueueLabel,
   machineState,
   normalizePreset,
+  normalizeTerrainPreset,
+  checkpointIteration,
+  checkpointOptionsForRun,
   refreshDelayForSnapshot,
   shouldReplaceVideoPanel,
   slugify,
   statusTone,
+  videoArtifactForCheckpoint,
+  videoStateForCheckpoint,
   videoStateForRun,
 } from "./core.js";
 
@@ -48,14 +56,18 @@ const state = {
     runs: [],
     artifacts: [],
     presets: [],
-    schema: { artifacts: true, rewardPresets: true, warnings: [] },
+    terrainPresets: [],
+    schema: { artifacts: true, rewardPresets: true, terrainPresets: true, warnings: [] },
   },
   selectedPresetId: localStorage.getItem("redrhex_child_preset") || "baseline",
   draftPreset: null,
+  selectedTerrainPresetId: localStorage.getItem("redrhex_child_terrain_preset") || "baseline",
+  draftTerrainPreset: null,
   selectedRunId: "",
   runSearch: "",
   folderFilter: "all",
   signedVideos: {},
+  videoCheckpointByRun: {},
   runDrafts: {},
   message: "",
   loading: false,
@@ -75,6 +87,11 @@ function role() {
 function selectedPreset() {
   const presets = state.snapshot.presets.map(normalizePreset);
   return presets.find((preset) => preset.id === state.selectedPresetId) || presets[0] || normalizePreset({ id: "baseline", name: "Baseline" });
+}
+
+function selectedTerrainPreset() {
+  const presets = state.snapshot.terrainPresets.map(normalizeTerrainPreset);
+  return presets.find((preset) => preset.id === state.selectedTerrainPresetId) || presets[0] || normalizeTerrainPreset({ id: "baseline", name: "Baseline" });
 }
 
 function selectedRun({ fallback = true } = {}) {
@@ -133,10 +150,18 @@ function signedVideoEntry(storagePath) {
   return entry;
 }
 
+function selectedVideoCheckpoint(run) {
+  if (!run) return "";
+  const options = checkpointOptionsForRun(run, state.snapshot.artifacts);
+  const saved = state.videoCheckpointByRun[run.id];
+  if (saved && options.some((option) => option.path === saved)) return saved;
+  return run.latest_checkpoint || options[0]?.path || "";
+}
+
 async function ensureSelectedVideoSigned() {
   const run = selectedRun();
   if (!run) return;
-  const video = videoStateForRun(run, state.snapshot.artifacts);
+  const video = videoStateForCheckpoint(run, state.snapshot.artifacts, selectedVideoCheckpoint(run));
   const storagePath = video.artifact?.storage_path;
   if (!storagePath) return;
   const existing = signedVideoEntry(storagePath);
@@ -162,11 +187,15 @@ async function refresh(options = {}) {
   try {
     state.snapshot = await loadRemoteSnapshot(state.machineId);
     state.snapshot.presets = state.snapshot.presets.map(normalizePreset);
+    state.snapshot.terrainPresets = (state.snapshot.terrainPresets || []).map(normalizeTerrainPreset);
     if (!state.selectedRunId && state.snapshot.runs[0] && !(state.view === "history" && state.isPhone)) {
       state.selectedRunId = state.snapshot.runs[0].id;
     }
     if (!state.snapshot.presets.find((preset) => preset.id === state.selectedPresetId) && state.snapshot.presets[0]) {
         state.selectedPresetId = state.snapshot.presets[0].id;
+    }
+    if (!state.snapshot.terrainPresets.find((preset) => preset.id === state.selectedTerrainPresetId) && state.snapshot.terrainPresets[0]) {
+      state.selectedTerrainPresetId = state.snapshot.terrainPresets[0].id;
     }
     state.lastUpdated = new Date().toISOString();
     await ensureSelectedVideoSigned();
@@ -210,6 +239,7 @@ function healthChecks() {
     ["accept", "Worker accepting jobs", Boolean(machine?.accept_jobs), machine?.accept_jobs ? "Ready to queue" : "Paused by mother panel"],
     ["gpu", "GPU lock", !machine?.gpu_locked, machine?.gpu_locked ? "Busy" : "Free"],
     ["rewards", "Reward preset schema", Boolean(state.snapshot.schema?.rewardPresets), state.snapshot.schema?.rewardPresets ? "Shared presets ready" : "Apply schema.sql in Supabase"],
+    ["terrain", "Terrain preset schema", Boolean(state.snapshot.schema?.terrainPresets), state.snapshot.schema?.terrainPresets ? "Shared terrain presets ready" : "Apply schema.sql in Supabase"],
     ["video", "Video storage", Boolean(state.snapshot.schema?.artifacts), state.snapshot.schema?.artifacts ? "Private signed playback ready" : "Apply schema.sql in Supabase"],
   ];
 }
@@ -219,6 +249,7 @@ function shell() {
     ["dashboard", "Dashboard"],
     ["train", "Train"],
     ["rewards", "Rewards"],
+    ["terrain", "Terrain"],
     ["history", "History"],
     ["connection", "Connection"],
   ];
@@ -272,6 +303,7 @@ function loginPage() {
 function page() {
   if (state.view === "train") return trainView();
   if (state.view === "rewards") return rewardsView();
+  if (state.view === "terrain") return terrainView();
   if (state.view === "history") return historyView();
   if (state.view === "connection") return connectionView();
   return dashboardView();
@@ -294,6 +326,7 @@ function dashboardView() {
           </div>
           <div class="quick-actions">
             <button class="primary" data-action="view" data-view="train">Train</button>
+            <button data-action="view" data-view="terrain">Terrain</button>
             <button data-action="view" data-view="history">History</button>
             <button data-action="view" data-view="connection">Connection</button>
           </div>
@@ -403,6 +436,7 @@ function jobSummary(jobs) {
 
 function trainView() {
   const preset = selectedPreset();
+  const terrainPreset = selectedTerrainPreset();
   const disabled = !canOperate(role());
   return `
     <section class="split-grid">
@@ -421,22 +455,30 @@ function trainView() {
             ${state.snapshot.presets.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === preset.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}
           </select>
         </label>
+        <label>Terrain Preset
+          <select id="train-terrain-preset">
+            ${state.snapshot.terrainPresets.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === terrainPreset.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}
+          </select>
+        </label>
         <button class="primary wide" data-action="queue-training" ${disabled ? "disabled" : ""}>Queue Training</button>
         ${disabled ? `<p class="muted">Viewer accounts can inspect but cannot launch training.</p>` : ""}
       </article>
       <article class="panel">
-        <div id="train-preset-snapshot">${trainPresetSnapshot(preset)}</div>
+        <div id="train-preset-snapshot">${trainPresetSnapshot(preset, terrainPreset)}</div>
       </article>
     </section>
   `;
 }
 
-function trainPresetSnapshot(preset) {
+function trainPresetSnapshot(preset, terrainPreset = selectedTerrainPreset()) {
   return `
     <h2>Preset Snapshot</h2>
     <h3>${escapeHtml(preset.name)}</h3>
     <p class="muted">${escapeHtml(preset.description || "No description.")}</p>
     ${rewardSnapshot(preset.values)}
+    <h3>${escapeHtml(terrainPreset.name)}</h3>
+    <p class="muted">${escapeHtml(terrainPreset.description || "No description.")}</p>
+    ${terrainSnapshot(terrainPreset.values)}
   `;
 }
 
@@ -447,13 +489,20 @@ function rewardSnapshot(values) {
     <div><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</div>`;
 }
 
+function terrainSnapshot(values) {
+  const entries = Object.entries(values || {});
+  if (!entries.length) return empty("Baseline uses the current local terrain defaults from mother.");
+  return `<div class="reward-snapshot">${entries.slice(0, 12).map(([key, value]) => `
+    <div><span>${escapeHtml(key)}</span><strong>${escapeHtml(formatTerrainValue(value))}</strong></div>`).join("")}${entries.length > 12 ? `<div><span>More</span><strong>${entries.length - 12} override${entries.length - 12 === 1 ? "" : "s"}</strong></div>` : ""}</div>`;
+}
+
 function rewardsView() {
   const preset = state.draftPreset || selectedPreset();
   const rewardSchemaReady = Boolean(state.snapshot.schema?.rewardPresets);
   const editable = rewardSchemaReady && canEditPreset(role()) && !preset.built_in;
   return `
     <section class="rewards-page">
-      ${presetRail(preset, rewardSchemaReady)}
+      ${presetRail("reward", preset, rewardSchemaReady)}
       <article class="panel reward-workspace">
         ${rewardHeader(preset, rewardSchemaReady, editable)}
         <div class="preset-meta-grid">
@@ -461,27 +510,54 @@ function rewardsView() {
           <label>Description <textarea id="preset-description" ${editable ? "" : "disabled"}>${escapeHtml(preset.description)}</textarea></label>
         </div>
         <div class="reward-editor">
-          ${REWARD_FIELDS.map((group) => rewardGroup(group, preset, editable)).join("")}
+          ${REWARD_FIELDS.map((group) => rewardGroup(group, preset, editable, "reward")).join("")}
         </div>
       </article>
     </section>
   `;
 }
 
-function presetRail(preset, rewardSchemaReady) {
+function terrainView() {
+  const preset = state.draftTerrainPreset || selectedTerrainPreset();
+  const terrainSchemaReady = Boolean(state.snapshot.schema?.terrainPresets);
+  const editable = terrainSchemaReady && canEditPreset(role()) && !preset.built_in;
+  return `
+    <section class="rewards-page terrain-page">
+      ${presetRail("terrain", preset, terrainSchemaReady)}
+      <article class="panel reward-workspace">
+        ${terrainHeader(preset, terrainSchemaReady, editable)}
+        <div class="preset-meta-grid">
+          <label>Name <input id="terrain-preset-name" value="${escapeHtml(preset.name)}" ${editable ? "" : "disabled"}></label>
+          <label>Description <textarea id="terrain-preset-description" ${editable ? "" : "disabled"}>${escapeHtml(preset.description)}</textarea></label>
+        </div>
+        <div class="reward-editor terrain-editor">
+          ${TERRAIN_FIELDS.map((group) => terrainGroup(group, preset, editable)).join("")}
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function presetRail(kind, preset, schemaReady) {
+  const isTerrain = kind === "terrain";
+  const presets = isTerrain ? state.snapshot.terrainPresets : state.snapshot.presets;
+  const title = isTerrain ? "Terrain" : "Presets";
+  const subtitle = isTerrain ? "Shared terrain recipes" : "Shared reward recipes";
+  const selectAction = isTerrain ? "select-terrain-preset" : "select-preset";
+  const newAction = isTerrain ? "new-terrain-preset" : "new-preset";
   return `
     <aside class="panel preset-list rewards-rail">
       <div class="section-head compact reward-rail-head">
         <div>
-          <h2>Presets</h2>
-          <p class="muted">Shared reward recipes</p>
+          <h2>${escapeHtml(title)}</h2>
+          <p class="muted">${escapeHtml(subtitle)}</p>
         </div>
-        <button class="icon-action" title="New preset" data-action="new-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>+</button>
+        <button class="icon-action" title="New preset" data-action="${newAction}" ${!schemaReady || !canEditPreset(role()) ? "disabled" : ""}>+</button>
       </div>
-      ${rewardSchemaReady ? "" : `<p class="muted">Using built-in fallback presets until Supabase schema is updated.</p>`}
+      ${schemaReady ? "" : `<p class="muted">Using built-in fallback presets until Supabase schema is updated.</p>`}
       <div class="preset-scroll">
-        ${state.snapshot.presets.map((item) => `
-        <button class="preset-button ${item.id === preset.id ? "active" : ""}" data-action="select-preset" data-id="${escapeHtml(item.id)}">
+        ${presets.map((item) => `
+        <button class="preset-button ${item.id === preset.id ? "active" : ""}" data-action="${selectAction}" data-id="${escapeHtml(item.id)}">
           <strong>${escapeHtml(item.name)}</strong>
           <small>${item.built_in ? "Built-in" : "Team preset"} · ${escapeHtml(formatRelativeTime(item.updated_at))}</small>
         </button>`).join("") || empty("Apply the V2.1 schema to create presets.")}
@@ -498,21 +574,45 @@ function rewardHeader(preset, rewardSchemaReady, editable) {
         <p class="muted">${escapeHtml(preset.built_in ? "Built-in preset. Duplicate it before editing." : editable ? "Editable team preset." : "Read-only preset.")}</p>
       </div>
       <div class="button-row reward-actions">
+        <button data-action="toggle-all-groups" data-kind="reward">Collapse All</button>
         <button data-action="duplicate-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>Duplicate</button>
+        <button class="danger" data-action="delete-preset" ${!editable ? "disabled" : ""}>Delete</button>
         <button class="primary" data-action="save-preset" ${!editable ? "disabled" : ""}>Save Preset</button>
       </div>
     </div>
   `;
 }
 
-function rewardGroup(group, preset, editable) {
+function terrainHeader(preset, terrainSchemaReady, editable) {
   return `
-    <section class="reward-group">
-      <h3>${escapeHtml(group.name)}</h3>
-      ${group.fields.map(([key, label, help]) => {
+    <div class="section-head reward-head">
+      <div>
+        <h2>Terrain Tuning</h2>
+        <p class="muted">${escapeHtml(preset.built_in ? "Built-in preset. Duplicate it before editing." : editable ? "Editable team preset." : "Read-only preset.")}</p>
+      </div>
+      <div class="button-row reward-actions">
+        <button data-action="toggle-all-groups" data-kind="terrain">Collapse All</button>
+        <button data-action="duplicate-terrain-preset" ${!terrainSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>Duplicate</button>
+        <button class="danger" data-action="delete-terrain-preset" ${!editable ? "disabled" : ""}>Delete</button>
+        <button class="primary" data-action="save-terrain-preset" ${!editable ? "disabled" : ""}>Save Preset</button>
+      </div>
+    </div>
+  `;
+}
+
+function rewardGroup(group, preset, editable, kind = "reward") {
+  return `
+    <section class="reward-group editor-group" data-kind="${escapeHtml(kind)}">
+      <button class="group-toggle" data-action="toggle-editor-group" type="button">
+        <span>${escapeHtml(group.name)}</span>
+        <span class="chevron">▾</span>
+      </button>
+      <div class="group-body">
+        ${group.fields.map(([key, label, help]) => {
         const value = Number(preset.values?.[key] ?? 0);
         return rewardInputRow(key, label, help, value, editable);
       }).join("")}
+      </div>
     </section>`;
 }
 
@@ -522,6 +622,65 @@ function rewardInputRow(key, label, help, value, editable) {
       <span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small><code>${escapeHtml(key)}</code></span>
       <input class="reward-input" data-key="${escapeHtml(key)}" type="number" step="0.01" value="${escapeHtml(value)}" ${editable ? "" : "disabled"}>
     </label>`;
+}
+
+function terrainGroup(group, preset, editable) {
+  return `
+    <section class="reward-group editor-group" data-kind="terrain">
+      <button class="group-toggle" data-action="toggle-editor-group" type="button">
+        <span>${escapeHtml(group.name)}</span>
+        <span class="chevron">▾</span>
+      </button>
+      <div class="group-body">
+        ${group.fields.map((field) => terrainInputRow(field, preset, editable)).join("")}
+      </div>
+    </section>`;
+}
+
+function terrainEffectiveValue(preset, key) {
+  if (Object.prototype.hasOwnProperty.call(preset.values || {}, key)) return preset.values[key];
+  return TERRAIN_DEFAULT_VALUES[key];
+}
+
+function formatTerrainValue(value) {
+  if (Array.isArray(value)) return `[${value.join(", ")}]`;
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function terrainInputRow(field, preset, editable) {
+  const value = terrainEffectiveValue(preset, field.key);
+  const defaultValue = TERRAIN_DEFAULT_VALUES[field.key];
+  return `
+    <label class="reward-row terrain-row">
+      <span>
+        <strong>${escapeHtml(field.label)}</strong>
+        <small>${escapeHtml(field.help || "")}</small>
+        <code>${escapeHtml(field.key)}</code>
+      </span>
+      <span class="terrain-control">
+        ${terrainInput(field, value, editable)}
+        <small>default ${escapeHtml(formatTerrainValue(defaultValue))}</small>
+      </span>
+    </label>`;
+}
+
+function terrainInput(field, value, editable) {
+  const disabled = editable ? "" : "disabled";
+  const safeValue = escapeHtml(formatTerrainValue(value));
+  if (field.type === "bool") {
+    return `<input class="terrain-input" data-key="${escapeHtml(field.key)}" data-type="bool" type="checkbox" ${value ? "checked" : ""} ${disabled}>`;
+  }
+  if (field.type === "choice") {
+    return `<select class="terrain-input" data-key="${escapeHtml(field.key)}" data-type="choice" ${disabled}>
+      ${(field.choices || []).map((choice) => `<option value="${escapeHtml(choice)}" ${String(choice) === String(value) ? "selected" : ""}>${escapeHtml(choice)}</option>`).join("")}
+    </select>`;
+  }
+  if (field.type === "int" || field.type === "float") {
+    return `<input class="terrain-input" data-key="${escapeHtml(field.key)}" data-type="${escapeHtml(field.type)}" type="number" step="${escapeHtml(String(field.step || (field.type === "int" ? 1 : 0.01)))}" value="${safeValue}" ${disabled}>`;
+  }
+  return `<input class="terrain-input terrain-wide-input" data-key="${escapeHtml(field.key)}" data-type="${escapeHtml(field.type)}" value="${safeValue}" ${disabled}>`;
 }
 
 function filteredRuns() {
@@ -699,6 +858,8 @@ function renderRunListOnly() {
 function runCard(run) {
   const video = videoStateForRun(run, state.snapshot.artifacts);
   const active = run.id === state.selectedRunId;
+  const params = run.params || {};
+  const terrainPreset = run.terrain_preset_id || params.terrain_preset_id || "baseline";
   return `
     <button class="run-card ${active ? "active" : ""}" data-action="select-run" data-id="${escapeHtml(run.id)}">
       <span class="run-card-top">
@@ -706,7 +867,7 @@ function runCard(run) {
         <span class="badge ${statusTone(run.status)}">${escapeHtml(run.status || "unknown")}</span>
       </span>
       <small>${escapeHtml(run.folder || "Uncategorized")} - ${escapeHtml(formatRelativeTime(run.created_at))}</small>
-      <small>${run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"} - video ${escapeHtml(video.state)}${run.onnx_path ? " - ONNX" : ""}</small>
+      <small>${run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"} - video ${escapeHtml(video.state)} - terrain ${escapeHtml(terrainPreset)}</small>
     </button>
   `;
 }
@@ -723,10 +884,14 @@ function runCardWithOptionalInlineDetails(run) {
 
 function runDetailsGrid(run) {
   const video = videoStateForRun(run, state.snapshot.artifacts);
+  const params = run.params || {};
+  const rewardOverrides = Object.keys(params.reward_overrides || run.reward_overrides || {}).length;
+  const terrainOverrides = Object.keys(params.terrain_overrides || run.terrain_overrides || {}).length;
   return `
     <div><span>Checkpoint</span><strong>${run.latest_checkpoint ? "ready" : "missing"}</strong></div>
     <div><span>Video</span><strong>${escapeHtml(video.state)}</strong></div>
-    <div><span>ONNX</span><strong>${run.onnx_path ? "ready" : "missing"}</strong></div>
+    <div><span>Reward</span><strong>${escapeHtml(run.reward_preset_id || params.reward_preset_id || "baseline")} · ${rewardOverrides}</strong></div>
+    <div><span>Terrain</span><strong>${escapeHtml(run.terrain_preset_id || params.terrain_preset_id || "baseline")} · ${terrainOverrides}</strong></div>
     <div><span>Updated</span><strong>${escapeHtml(formatRelativeTime(run.updated_at || run.created_at))}</strong></div>
   `;
 }
@@ -745,31 +910,54 @@ function relatedJobsSection(run) {
     <section id="related-jobs-panel" class="subpanel">
       <h3>Related Jobs</h3>
       ${relatedJobs.length ? `<div class="mini-list">${relatedJobs.map((job) => `
-        <div><strong>${escapeHtml(job.type)}</strong><span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span><small>${escapeHtml(jobQueueLabel(job, state.snapshot.targetMachine || state.snapshot.machine))}</small><small>${escapeHtml(formatRelativeTime(job.created_at))}</small></div>
+        <div><strong>${escapeHtml(job.type)}</strong><span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span><small>${escapeHtml(jobQueueLabel(job, state.snapshot.targetMachine || state.snapshot.machine))}</small>${jobExtraLine(job)}<small>${escapeHtml(formatRelativeTime(job.created_at))}</small></div>
       `).join("")}</div>` : empty("No remote jobs linked to this run yet.")}
     </section>
   `;
 }
 
+function jobExtraLine(job) {
+  const payload = job.result?.payload || {};
+  if (job.type === "tensorboard" && payload.url) {
+    return `<small><a href="${escapeHtml(payload.url)}" target="_blank" rel="noreferrer">TensorBoard ${escapeHtml(payload.url)}</a></small>`;
+  }
+  if (job.type === "record_video" && job.payload?.checkpoint_iteration) {
+    return `<small>checkpoint iteration ${escapeHtml(job.payload.checkpoint_iteration)}</small>`;
+  }
+  return "";
+}
+
 function teamVideoSection(run) {
-  const video = videoStateForRun(run, state.snapshot.artifacts);
+  const options = checkpointOptionsForRun(run, state.snapshot.artifacts);
+  const checkpoint = selectedVideoCheckpoint(run);
+  const selectedOption = options.find((option) => option.path === checkpoint) || options[0] || null;
+  const video = videoStateForCheckpoint(run, state.snapshot.artifacts, checkpoint);
   const videoArtifact = video.artifact;
   const signed = videoArtifact ? signedVideoEntry(videoArtifact.storage_path)?.url || "" : "";
-  const runnable = canOperate(role()) && Boolean(run.latest_checkpoint);
+  const runnable = canOperate(role()) && Boolean(checkpoint);
   const storagePath = videoArtifact?.storage_path || "";
   return `
     <section id="team-video-panel" class="subpanel" data-video-state="${escapeHtml(video.state)}" data-storage-path="${escapeHtml(storagePath)}">
-      <h3>Team Video</h3>
+      <div class="section-head compact">
+        <h3>Team Video</h3>
+        <span class="badge ${statusTone(video.state)}">${escapeHtml(video.state)}</span>
+      </div>
+      <label>Checkpoint
+        <select id="video-checkpoint-select" ${options.length ? "" : "disabled"}>
+          ${options.map((option) => `<option value="${escapeHtml(option.path)}" ${option.path === checkpoint ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+        </select>
+      </label>
       ${video.state === "ready" ? `
         ${signed ? `<video controls src="${escapeHtml(signed)}"></video>` : `<p class="muted">Preparing a signed team-only video link...</p>`}
         <div class="button-row">
           <button data-action="load-video" data-path="${escapeHtml(videoArtifact.storage_path)}">Load Video</button>
+          <button data-action="check-video" ${runnable ? "" : "disabled"}>Check / Create Video</button>
           <button data-action="copy-video-path" data-path="${escapeHtml(videoArtifact.storage_path)}">Copy Storage Path</button>
         </div>` : video.state === "uploading" ? `
-        <p class="muted">Video exists locally and is uploading to team storage. This panel will refresh automatically.</p>
+        <p class="muted">Video exists locally for ${escapeHtml(selectedOption?.label || "this checkpoint")} and is uploading to team storage.</p>
       ` : video.state === "recordable" ? `
-        <p class="muted">No team video yet. Record one from the latest checkpoint.</p>
-        <button class="primary" data-action="job-record-video" ${runnable ? "" : "disabled"}>Record Video</button>
+        <p class="muted">No team video yet for ${escapeHtml(selectedOption?.label || "this checkpoint")}.</p>
+        <button class="primary" data-action="check-video" ${runnable ? "" : "disabled"}>Create Video</button>
       ` : `<p class="muted">No checkpoint yet, so video recording is not available.</p>`}
     </section>
   `;
@@ -778,7 +966,7 @@ function teamVideoSection(run) {
 function runDetails(run, { context = "desktop" } = {}) {
   const draft = currentRunDraft(run);
   const editable = canEditRun(role());
-  const runnable = canOperate(role()) && Boolean(run.latest_checkpoint);
+  const runnable = canOperate(role()) && Boolean(selectedVideoCheckpoint(run));
   return `
     <div class="section-head run-detail-head ${context === "inline" ? "inline" : ""}">
       <div>
@@ -801,9 +989,9 @@ function runDetails(run, { context = "desktop" } = {}) {
     <section class="subpanel">
       <h3>Safe Remote Actions</h3>
       <div class="button-row wrap">
-        <button data-action="job-record-video" ${runnable ? "" : "disabled"}>Record Video</button>
-        <button data-action="job-export-onnx" ${runnable ? "" : "disabled"}>Export ONNX</button>
-        <button data-action="job-stop" ${canOperate(role()) ? "" : "disabled"}>Stop Active Process</button>
+        <button data-action="check-video" ${runnable ? "" : "disabled"}>Check / Create Video</button>
+        <button data-action="job-tensorboard" ${canOperate(role()) ? "" : "disabled"}>TensorBoard</button>
+        <button data-action="job-compact-run" ${canOperate(role()) ? "" : "disabled"}>Compact Run</button>
       </div>
     </section>
     ${relatedJobsSection(run)}
@@ -933,7 +1121,8 @@ function patchRunCardsInPlace() {
     }
     const lines = card.querySelectorAll("small");
     if (lines[0]) lines[0].textContent = `${run.folder || "Uncategorized"} - ${formatRelativeTime(run.created_at)}`;
-    if (lines[1]) lines[1].textContent = `${run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"} - video ${video.state}${run.onnx_path ? " - ONNX" : ""}`;
+    const params = run.params || {};
+    if (lines[1]) lines[1].textContent = `${run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"} - video ${video.state} - terrain ${run.terrain_preset_id || params.terrain_preset_id || "baseline"}`;
   });
 }
 
@@ -975,7 +1164,7 @@ function isRunMetadataFocused() {
 function patchTeamVideo(run) {
   const panel = document.querySelector("#team-video-panel");
   if (!panel || !run) return;
-  const video = videoStateForRun(run, state.snapshot.artifacts);
+  const video = videoStateForCheckpoint(run, state.snapshot.artifacts, selectedVideoCheckpoint(run));
   const nextStorage = video.artifact?.storage_path || "";
   const videoElement = panel.querySelector("video");
   if (videoElement && panel.dataset.storagePath && !nextStorage) return;
@@ -1068,6 +1257,61 @@ function collectRewardValues() {
   return values;
 }
 
+function parseTerrainValue(input) {
+  const type = input.dataset.type || "string";
+  if (type === "bool") return Boolean(input.checked);
+  if (type === "int") return Number.parseInt(input.value || "0", 10);
+  if (type === "float") return Number.parseFloat(input.value || "0");
+  if (type === "range" || type === "list") {
+    const text = String(input.value || "").trim();
+    if (!text) return [];
+    try {
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return text
+        .replace(/^\[|\]$/g, "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => {
+          const value = Number(item);
+          return Number.isFinite(value) ? value : item;
+        });
+    }
+  }
+  return input.value || "";
+}
+
+function collectTerrainValues() {
+  const values = {};
+  document.querySelectorAll(".terrain-input").forEach((input) => {
+    values[input.dataset.key] = parseTerrainValue(input);
+  });
+  return values;
+}
+
+function setGroupsCollapsed(kind, collapsed) {
+  document.querySelectorAll(`.editor-group[data-kind="${kind}"]`).forEach((group) => {
+    group.classList.toggle("collapsed", collapsed);
+  });
+  updateGroupToggleLabel(kind);
+}
+
+function updateGroupToggleLabel(kind) {
+  const button = document.querySelector(`[data-action="toggle-all-groups"][data-kind="${kind}"]`);
+  if (!button) return;
+  const groups = [...document.querySelectorAll(`.editor-group[data-kind="${kind}"]`)];
+  const allCollapsed = groups.length > 0 && groups.every((group) => group.classList.contains("collapsed"));
+  button.textContent = allCollapsed ? "Expand All" : "Collapse All";
+}
+
+function toggleAllGroups(kind) {
+  const groups = [...document.querySelectorAll(`.editor-group[data-kind="${kind}"]`)];
+  const allCollapsed = groups.length > 0 && groups.every((group) => group.classList.contains("collapsed"));
+  setGroupsCollapsed(kind, !allCollapsed);
+}
+
 async function handleLogin() {
   const email = document.querySelector("#login-email")?.value || "";
   const password = document.querySelector("#login-password")?.value || "";
@@ -1084,17 +1328,21 @@ async function queueTraining() {
   const presetId = document.querySelector("#train-preset")?.value || state.selectedPresetId;
   state.selectedPresetId = presetId;
   localStorage.setItem("redrhex_child_preset", presetId);
+  const terrainPresetId = document.querySelector("#train-terrain-preset")?.value || state.selectedTerrainPresetId;
+  state.selectedTerrainPresetId = terrainPresetId;
+  localStorage.setItem("redrhex_child_terrain_preset", terrainPresetId);
   const preset = selectedPreset();
+  const terrainPreset = selectedTerrainPreset();
   const params = {
     task: document.querySelector("#task")?.value || "Template-Redrhex-Direct-v0",
     num_envs: Number(document.querySelector("#num-envs")?.value || 4),
     max_iterations: Number(document.querySelector("#max-iterations")?.value || 8),
     device: document.querySelector("#device")?.value || "cuda:0",
   };
-  const job = buildTrainingJob({ machineId: state.machineId, params, preset, role: role(), userId: state.user?.id });
+  const job = buildTrainingJob({ machineId: state.machineId, params, preset, terrainPreset, role: role(), userId: state.user?.id });
   await insert("jobs", job);
   await refresh({ silent: true });
-  setMessage(`Queued training with ${preset.name}.`);
+  setMessage(`Queued training with ${preset.name} and ${terrainPreset.name}.`);
 }
 
 async function savePreset() {
@@ -1117,6 +1365,23 @@ async function savePreset() {
   setMessage(`Saved preset ${payload.name}.`);
 }
 
+async function deletePreset() {
+  const preset = state.draftPreset || selectedPreset();
+  if (!preset || preset.built_in) return;
+  if (!window.confirm(`Delete reward preset "${preset.name}"?`)) return;
+  if (state.draftPreset) {
+    state.draftPreset = null;
+    state.selectedPresetId = "baseline";
+    render();
+    return;
+  }
+  await remove("reward_presets", `id=eq.${encodeURIComponent(preset.id)}`);
+  state.selectedPresetId = "baseline";
+  localStorage.setItem("redrhex_child_preset", state.selectedPresetId);
+  await refresh();
+  setMessage(`Deleted preset ${preset.name}.`);
+}
+
 function duplicatePreset() {
   const source = state.draftPreset || selectedPreset();
   const id = slugify(`${source.id || source.name}-copy`);
@@ -1129,6 +1394,73 @@ function duplicatePreset() {
     created_by: state.user?.id || null,
   };
   state.selectedPresetId = id;
+  render();
+}
+
+async function saveTerrainPreset() {
+  const preset = state.draftTerrainPreset || selectedTerrainPreset();
+  if (preset.built_in) return;
+  const payload = {
+    id: preset.id,
+    name: document.querySelector("#terrain-preset-name")?.value || preset.name,
+    description: document.querySelector("#terrain-preset-description")?.value || "",
+    values: collectTerrainValues(),
+    built_in: false,
+    updated_by: state.user?.id || null,
+    updated_at: new Date().toISOString(),
+  };
+  if (!preset.created_by) payload.created_by = state.user?.id || null;
+  await upsert("terrain_presets", payload);
+  state.draftTerrainPreset = null;
+  state.selectedTerrainPresetId = payload.id;
+  localStorage.setItem("redrhex_child_terrain_preset", payload.id);
+  await refresh();
+  setMessage(`Saved terrain preset ${payload.name}.`);
+}
+
+async function deleteTerrainPreset() {
+  const preset = state.draftTerrainPreset || selectedTerrainPreset();
+  if (!preset || preset.built_in) return;
+  if (!window.confirm(`Delete terrain preset "${preset.name}"?`)) return;
+  if (state.draftTerrainPreset) {
+    state.draftTerrainPreset = null;
+    state.selectedTerrainPresetId = "baseline";
+    render();
+    return;
+  }
+  await remove("terrain_presets", `id=eq.${encodeURIComponent(preset.id)}`);
+  state.selectedTerrainPresetId = "baseline";
+  localStorage.setItem("redrhex_child_terrain_preset", state.selectedTerrainPresetId);
+  await refresh();
+  setMessage(`Deleted terrain preset ${preset.name}.`);
+}
+
+function duplicateTerrainPreset() {
+  const source = state.draftTerrainPreset || selectedTerrainPreset();
+  const id = slugify(`${source.id || source.name}-copy`);
+  state.draftTerrainPreset = {
+    ...source,
+    id,
+    name: `${source.name} Copy`,
+    built_in: false,
+    values: { ...(source.values || {}) },
+    created_by: state.user?.id || null,
+  };
+  state.selectedTerrainPresetId = id;
+  render();
+}
+
+function newTerrainPreset() {
+  const id = slugify(`team-terrain-${Date.now()}`);
+  state.draftTerrainPreset = {
+    id,
+    name: "New Terrain Preset",
+    description: "",
+    values: { ...TERRAIN_DEFAULT_VALUES },
+    built_in: false,
+    created_by: state.user?.id || null,
+  };
+  state.selectedTerrainPresetId = id;
   render();
 }
 
@@ -1162,13 +1494,46 @@ async function saveRun() {
   setMessage("Run metadata saved.");
 }
 
-async function queueRunAction(type, message) {
+async function queueRunAction(type, message, payload = {}) {
   const run = selectedRun();
   if (!run) return;
-  const job = buildActionJob({ machineId: state.machineId, type, runId: run.id, role: role(), userId: state.user?.id });
+  const job = buildActionJob({ machineId: state.machineId, type, runId: run.id, role: role(), userId: state.user?.id, payload });
   await insert("jobs", job);
   await refresh({ silent: true });
   setMessage(message);
+}
+
+async function checkOrCreateVideo() {
+  const run = selectedRun();
+  if (!run) return;
+  const checkpoint = selectedVideoCheckpoint(run);
+  const videoArtifact = videoArtifactForCheckpoint(run, state.snapshot.artifacts, checkpoint);
+  if (videoArtifact?.storage_path) {
+    await loadVideo(videoArtifact.storage_path);
+    return setMessage("Loaded the existing video for that checkpoint.");
+  }
+  const iteration = checkpointIteration(checkpoint);
+  await queueRunAction(
+    "record_video",
+    Number.isFinite(iteration) ? `Queued video for iteration ${iteration}.` : "Queued checkpoint video.",
+    {
+      checkpoint,
+      checkpoint_iteration: Number.isFinite(iteration) ? iteration : null,
+    },
+  );
+}
+
+async function queueTensorBoard() {
+  const run = selectedRun();
+  if (!run) return;
+  await queueRunAction("tensorboard", "Queued TensorBoard startup.", { host: "0.0.0.0" });
+}
+
+async function compactSelectedRun() {
+  const run = selectedRun();
+  if (!run) return;
+  if (!window.confirm(`Compact run "${run.display_name || run.id}"? Older checkpoints and bulky cache files may be removed.`)) return;
+  await queueRunAction("compact_run", "Queued run compaction.", { confirmation: run.id });
 }
 
 async function loadVideo(storagePath) {
@@ -1243,9 +1608,27 @@ document.addEventListener("click", async (event) => {
       localStorage.setItem("redrhex_child_preset", state.selectedPresetId);
       return render();
     }
+    if (action === "select-terrain-preset") {
+      state.selectedTerrainPresetId = target.dataset.id;
+      state.draftTerrainPreset = null;
+      localStorage.setItem("redrhex_child_terrain_preset", state.selectedTerrainPresetId);
+      return render();
+    }
     if (action === "duplicate-preset") return duplicatePreset();
     if (action === "new-preset") return newPreset();
     if (action === "save-preset") return await savePreset();
+    if (action === "delete-preset") return await deletePreset();
+    if (action === "duplicate-terrain-preset") return duplicateTerrainPreset();
+    if (action === "new-terrain-preset") return newTerrainPreset();
+    if (action === "save-terrain-preset") return await saveTerrainPreset();
+    if (action === "delete-terrain-preset") return await deleteTerrainPreset();
+    if (action === "toggle-editor-group") {
+      const group = target.closest(".editor-group");
+      group?.classList.toggle("collapsed");
+      updateGroupToggleLabel(group?.dataset.kind || "reward");
+      return;
+    }
+    if (action === "toggle-all-groups") return toggleAllGroups(target.dataset.kind || "reward");
     if (action === "open-folder") return openHistoryFolder(target.dataset.folder || "all");
     if (action === "open-folder-root") return openHistoryFolder("all");
     if (action === "select-run") {
@@ -1274,9 +1657,9 @@ document.addEventListener("click", async (event) => {
       await navigator.clipboard.writeText(target.dataset.path || "");
       return setMessage("Video storage path copied.");
     }
-    if (action === "job-record-video") return await queueRunAction("record_video", "Queued video recording.");
-    if (action === "job-export-onnx") return await queueRunAction("export_onnx", "Queued ONNX export.");
-    if (action === "job-stop") return await queueRunAction("stop_process", "Queued stop request.");
+    if (action === "check-video") return await checkOrCreateVideo();
+    if (action === "job-tensorboard") return await queueTensorBoard();
+    if (action === "job-compact-run") return await compactSelectedRun();
   } catch (error) {
     setMessage(friendlyErrorMessage(error));
   }
@@ -1288,14 +1671,35 @@ document.addEventListener("change", (event) => {
     localStorage.setItem("redrhex_child_preset", state.selectedPresetId);
     const snapshot = document.querySelector("#train-preset-snapshot");
     if (snapshot) {
-      snapshot.innerHTML = trainPresetSnapshot(selectedPreset());
+      snapshot.innerHTML = trainPresetSnapshot(selectedPreset(), selectedTerrainPreset());
     } else {
       render();
+    }
+  }
+  if (event.target.id === "train-terrain-preset") {
+    state.selectedTerrainPresetId = event.target.value;
+    localStorage.setItem("redrhex_child_terrain_preset", state.selectedTerrainPresetId);
+    const snapshot = document.querySelector("#train-preset-snapshot");
+    if (snapshot) {
+      snapshot.innerHTML = trainPresetSnapshot(selectedPreset(), selectedTerrainPreset());
+    } else {
+      render();
+    }
+  }
+  if (event.target.id === "video-checkpoint-select") {
+    const run = selectedRun();
+    if (run) {
+      state.videoCheckpointByRun[run.id] = event.target.value;
+      patchTeamVideo(run);
+      ensureSelectedVideoSigned().then(() => patchTeamVideo(run)).catch((error) => setMessage(friendlyErrorMessage(error)));
     }
   }
   if (event.target.id === "folder-filter") {
     state.folderFilter = event.target.value;
     renderRunListOnly();
+  }
+  if (event.target.classList.contains("terrain-input") && state.draftTerrainPreset) {
+    state.draftTerrainPreset.values[event.target.dataset.key] = parseTerrainValue(event.target);
   }
 });
 
@@ -1321,8 +1725,17 @@ document.addEventListener("input", (event) => {
   if (event.target.id === "preset-description" && state.draftPreset) {
     state.draftPreset.description = event.target.value;
   }
+  if (event.target.id === "terrain-preset-name" && state.draftTerrainPreset) {
+    state.draftTerrainPreset.name = event.target.value;
+  }
+  if (event.target.id === "terrain-preset-description" && state.draftTerrainPreset) {
+    state.draftTerrainPreset.description = event.target.value;
+  }
   if (event.target.classList.contains("reward-input") && state.draftPreset) {
     state.draftPreset.values[event.target.dataset.key] = Number(event.target.value || 0);
+  }
+  if (event.target.classList.contains("terrain-input") && state.draftTerrainPreset) {
+    state.draftTerrainPreset.values[event.target.dataset.key] = parseTerrainValue(event.target);
   }
 });
 

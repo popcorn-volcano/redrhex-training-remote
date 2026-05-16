@@ -293,6 +293,56 @@ video {
   grid-column: 1 / -1;
 }
 
+.dashboard-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.dashboard-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dashboard-status-card {
+  display: grid;
+  gap: 5px;
+}
+
+.dashboard-status-card.good {
+  border-color: rgba(38, 115, 77, 0.26);
+}
+
+.dashboard-status-card.info {
+  border-color: rgba(42, 99, 183, 0.26);
+}
+
+.dashboard-status-card.bad {
+  border-color: rgba(179, 58, 54, 0.24);
+}
+
+.dashboard-status-card strong {
+  font-size: 18px;
+}
+
+.dashboard-status-card.good strong {
+  color: var(--good);
+}
+
+.dashboard-status-card.info strong {
+  color: var(--info);
+}
+
+.dashboard-status-card.bad strong {
+  color: var(--bad);
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .intro-panel {
   background: linear-gradient(135deg, #ffffff, #eef7f3);
 }
@@ -350,6 +400,11 @@ video {
   gap: 9px;
 }
 
+.run-card-wrap {
+  display: grid;
+  gap: 0;
+}
+
 .run-card,
 .preset-button {
   display: grid;
@@ -387,6 +442,22 @@ video {
 
 .run-details {
   min-height: 520px;
+}
+
+.inline-run-details {
+  border: 1px solid var(--accent);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.inline-history .run-card-wrap.active .run-card {
+  border-radius: 7px 7px 0 0;
+}
+
+.inline-run-details .section-head {
+  align-items: start;
 }
 
 .subpanel {
@@ -511,6 +582,10 @@ video {
 }
 
 @media (max-width: 980px) {
+  .dashboard-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .health-grid,
   .details-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -551,7 +626,7 @@ video {
 
 @media (max-width: 720px) {
   body {
-    font-size: 15px;
+    font-size: 16px;
   }
 
   .remote-shell {
@@ -563,10 +638,18 @@ video {
     font-size: clamp(26px, 8vw, 34px);
   }
 
+  h2 {
+    font-size: 20px;
+  }
+
+  h3 {
+    font-size: 17px;
+  }
+
   button,
   input,
   select {
-    min-height: 44px;
+    min-height: 46px;
   }
 
   textarea {
@@ -577,6 +660,7 @@ video {
   .section-head,
   .login-grid,
   .dashboard-grid,
+  .dashboard-status-grid,
   .split-grid,
   .connection-grid,
   .health-grid,
@@ -608,13 +692,26 @@ video {
     padding: 13px;
   }
 
+  .quick-actions {
+    grid-template-columns: 1fr;
+  }
+
   .run-list-panel {
     max-height: 48vh;
     overflow: auto;
   }
 
+  .inline-history .run-list-panel {
+    max-height: none;
+    overflow: visible;
+  }
+
   .run-details {
     min-height: 0;
+  }
+
+  .inline-run-details {
+    padding: 13px;
   }
 
   .section-head {
@@ -629,7 +726,105 @@ video {
     flex: 1;
   }
 
+  .rewards-page {
+    gap: 12px;
+  }
+
+  .rewards-rail {
+    margin: 0 -2px;
+  }
+
+  .reward-rail-head {
+    align-items: center;
+  }
+
+  .preset-scroll {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 2px 2px 8px;
+    scroll-snap-type: x proximity;
+  }
+
+  .preset-button {
+    min-width: min(310px, 82vw);
+    padding: 14px;
+    scroll-snap-align: start;
+  }
+
+  .preset-button strong {
+    font-size: 17px;
+  }
+
+  .preset-button small {
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .reward-workspace {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .reward-head {
+    position: sticky;
+    top: 8px;
+    z-index: 5;
+    padding: 13px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: var(--shadow);
+  }
+
+  .reward-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .preset-meta-grid {
+    margin-top: 12px;
+  }
+
+  .preset-meta-grid label,
+  .reward-group {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 13px;
+  }
+
+  .reward-group {
+    padding: 15px;
+  }
+
+  .reward-group h3 {
+    margin-bottom: 12px;
+  }
+
+  .reward-row {
+    gap: 9px;
+    padding-top: 13px;
+  }
+
+  .reward-row strong {
+    font-size: 16px;
+  }
+
+  .reward-row small {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .reward-row code {
+    font-size: 12px;
+  }
+
   .reward-row input {
     width: 100%;
+    min-height: 48px;
+    font-size: 18px;
   }
 }

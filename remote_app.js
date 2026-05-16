@@ -32,6 +32,10 @@ import {
   videoStateForRun,
 } from "./core.js";
 
+const PHONE_MEDIA = window.matchMedia
+  ? window.matchMedia("(max-width: 720px)")
+  : { matches: false, addEventListener: null, addListener: null };
+
 const state = {
   user: null,
   profile: null,
@@ -59,6 +63,7 @@ const state = {
   lastUpdated: "",
   refreshTimer: null,
   refreshing: false,
+  isPhone: PHONE_MEDIA.matches,
 };
 
 const app = document.querySelector("#app");
@@ -259,42 +264,102 @@ function page() {
 }
 
 function dashboardView() {
-  const machine = state.snapshot.targetMachine || state.snapshot.machine;
-  const latestRuns = state.snapshot.runs.slice(0, 5);
-  const jobs = state.snapshot.jobs.slice(0, 6);
   return `
-    <section class="dashboard-grid">
-      <article class="panel span-2">
-        <div class="section-head">
-          <div>
-            <h2>Connection Health</h2>
-            <p class="muted">A quick read on whether the child can talk to mother through Supabase.</p>
+    <section class="dashboard-stack">
+      <div id="dashboard-status-cards" class="dashboard-status-grid">
+        ${dashboardStatusCards()}
+      </div>
+      <section class="dashboard-grid">
+        <article class="panel dashboard-actions-panel">
+          <div class="section-head">
+            <div>
+              <h2>Go</h2>
+              <p class="muted">The three places your phone usually needs.</p>
+            </div>
+            <button data-action="refresh">${state.loading ? "Refreshing" : "Refresh"}</button>
           </div>
-          <button data-action="refresh">${state.loading ? "Refreshing" : "Refresh"}</button>
-        </div>
-        <div id="health-grid" class="health-grid">
-          ${healthChecks().map(([, label, ok, detail]) => `
-            <div class="health-card ${ok ? "ok" : "warn"}">
-              <span>${escapeHtml(label)}</span>
-              <strong>${ok ? "OK" : "Needs attention"}</strong>
-              <small>${escapeHtml(detail)}</small>
-            </div>`).join("")}
-        </div>
-      </article>
-      <article class="panel">
-        <h2>Machine</h2>
-        <div id="machine-card-slot">${machineCard(machine)}</div>
-      </article>
-      <article class="panel">
-        <h2>Queue</h2>
-        <div id="queue-summary-slot">${jobSummary(jobs)}</div>
-      </article>
-      <article class="panel span-2">
-        <h2>Latest Runs</h2>
-        <div id="latest-runs-slot" class="run-strip">${latestRuns.map(runCard).join("") || empty("No runs synced yet.")}</div>
-      </article>
+          <div class="quick-actions">
+            <button class="primary" data-action="view" data-view="train">Train</button>
+            <button data-action="view" data-view="history">History</button>
+            <button data-action="view" data-view="connection">Connection</button>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="section-head compact">
+            <h2>Queue</h2>
+            <span class="badge">${escapeHtml(state.lastUpdated ? `Updated ${formatRelativeTime(state.lastUpdated)}` : "Not updated")}</span>
+          </div>
+          <div id="dashboard-queue-summary">${dashboardQueueSummary()}</div>
+        </article>
+        <article class="panel span-2">
+          <div class="section-head compact">
+            <h2>Latest Runs</h2>
+            <button data-action="view" data-view="history">View All</button>
+          </div>
+          <div id="dashboard-latest-runs" class="run-strip">${dashboardLatestRuns()}</div>
+        </article>
+      </section>
     </section>
   `;
+}
+
+function dashboardStatusCards() {
+  const machine = state.snapshot.targetMachine || state.snapshot.machine;
+  const machineStatus = machineState(machine);
+  const jobs = state.snapshot.jobs || [];
+  const queued = jobs.filter((job) => String(job.status || "").toLowerCase() === "queued").length;
+  const running = jobs.filter((job) => ["claimed", "running"].includes(String(job.status || "").toLowerCase())).length;
+  const failed = jobs.filter((job) => String(job.status || "").toLowerCase() === "failed").slice(0, 5).length;
+  const latestRun = state.snapshot.runs[0];
+  const stateCopy = {
+    ready: ["Ready", "Mother is online and accepting jobs."],
+    busy: ["Busy", "An Isaac/GPU action is running."],
+    paused: ["Paused", "Remote launch is paused in mother."],
+    offline: ["Offline", "Mother heartbeat is stale."],
+    missing: ["No Machine", "Start the worker from mother Control Center."],
+  }[machineStatus] || [machineStatus, "Machine state is unknown."];
+  return `
+    <article class="panel dashboard-status-card ${statusTone(machineStatus)}">
+      <span>Machine</span>
+      <strong>${escapeHtml(stateCopy[0])}</strong>
+      <small>${escapeHtml(stateCopy[1])}</small>
+    </article>
+    <article class="panel dashboard-status-card ${machine?.accept_jobs ? "good" : "muted"}">
+      <span>Remote Launch</span>
+      <strong>${machine?.accept_jobs ? "Accepting" : "Paused"}</strong>
+      <small>${machine ? escapeHtml(machine.machine_id) : "No machine selected"}</small>
+    </article>
+    <article class="panel dashboard-status-card ${running || queued ? "info" : failed ? "bad" : "good"}">
+      <span>Queue</span>
+      <strong>${running} running · ${queued} queued</strong>
+      <small>${failed ? `${failed} recent failed` : "No recent failures"}</small>
+    </article>
+    <article class="panel dashboard-status-card ${statusTone(latestRun?.status)}">
+      <span>Latest Run</span>
+      <strong>${escapeHtml(latestRun?.display_name || latestRun?.id || "None yet")}</strong>
+      <small>${latestRun ? `${escapeHtml(latestRun.status || "unknown")} · ${escapeHtml(formatRelativeTime(latestRun.created_at))}` : "Queue a training job to begin."}</small>
+    </article>
+  `;
+}
+
+function dashboardQueueSummary() {
+  const machine = state.snapshot.targetMachine || state.snapshot.machine;
+  const jobs = state.snapshot.jobs || [];
+  const active = jobs.filter((job) => ["queued", "claimed", "running"].includes(String(job.status || "").toLowerCase()));
+  const visibleJobs = (active.length ? active : jobs).slice(0, 5);
+  if (!visibleJobs.length) return empty("No remote jobs yet.");
+  return `<div class="mini-list">${visibleJobs.map((job) => `
+    <div>
+      <strong>${escapeHtml(job.type)}</strong>
+      <span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span>
+      <small>${escapeHtml(jobQueueLabel(job, machine))}</small>
+      <small>${escapeHtml(formatRelativeTime(job.created_at))}</small>
+    </div>`).join("")}</div>`;
+}
+
+function dashboardLatestRuns() {
+  const latestRuns = state.snapshot.runs.slice(0, state.isPhone ? 3 : 5);
+  return latestRuns.map(runCard).join("") || empty("No runs synced yet.");
 }
 
 function machineCard(machine) {
@@ -374,55 +439,75 @@ function rewardsView() {
   const editable = rewardSchemaReady && canEditPreset(role()) && !preset.built_in;
   return `
     <section class="rewards-page">
-      <aside class="panel preset-list rewards-rail">
-        <div class="section-head compact reward-rail-head">
-          <div>
-            <h2>Presets</h2>
-            <p class="muted">Shared reward recipes</p>
-          </div>
-          <button class="icon-action" title="New preset" data-action="new-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>+</button>
-        </div>
-        ${rewardSchemaReady ? "" : `<p class="muted">Using built-in fallback presets until Supabase schema is updated.</p>`}
-        <div class="preset-scroll">
-          ${state.snapshot.presets.map((item) => `
-          <button class="preset-button ${item.id === preset.id ? "active" : ""}" data-action="select-preset" data-id="${escapeHtml(item.id)}">
-            <strong>${escapeHtml(item.name)}</strong>
-            <small>${item.built_in ? "Built-in" : "Team preset"} · ${escapeHtml(formatRelativeTime(item.updated_at))}</small>
-          </button>`).join("") || empty("Apply the V2.1 schema to create presets.")}
-        </div>
-      </aside>
+      ${presetRail(preset, rewardSchemaReady)}
       <article class="panel reward-workspace">
-        <div class="section-head reward-head">
-          <div>
-            <h2>Reward Tuning</h2>
-            <p class="muted">${escapeHtml(preset.built_in ? "Built-in preset. Duplicate it before editing." : editable ? "Editable team preset." : "Read-only preset.")}</p>
-          </div>
-          <div class="button-row">
-            <button data-action="duplicate-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>Duplicate</button>
-            <button class="primary" data-action="save-preset" ${!editable ? "disabled" : ""}>Save Preset</button>
-          </div>
-        </div>
+        ${rewardHeader(preset, rewardSchemaReady, editable)}
         <div class="preset-meta-grid">
           <label>Name <input id="preset-name" value="${escapeHtml(preset.name)}" ${editable ? "" : "disabled"}></label>
           <label>Description <textarea id="preset-description" ${editable ? "" : "disabled"}>${escapeHtml(preset.description)}</textarea></label>
         </div>
         <div class="reward-editor">
-          ${REWARD_FIELDS.map((group) => `
-            <section class="reward-group">
-              <h3>${escapeHtml(group.name)}</h3>
-              ${group.fields.map(([key, label, help]) => {
-                const value = Number(preset.values?.[key] ?? 0);
-                return `
-                  <label class="reward-row">
-                    <span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small><code>${escapeHtml(key)}</code></span>
-                    <input class="reward-input" data-key="${escapeHtml(key)}" type="number" step="0.01" value="${escapeHtml(value)}" ${editable ? "" : "disabled"}>
-                  </label>`;
-              }).join("")}
-            </section>`).join("")}
+          ${REWARD_FIELDS.map((group) => rewardGroup(group, preset, editable)).join("")}
         </div>
       </article>
     </section>
   `;
+}
+
+function presetRail(preset, rewardSchemaReady) {
+  return `
+    <aside class="panel preset-list rewards-rail">
+      <div class="section-head compact reward-rail-head">
+        <div>
+          <h2>Presets</h2>
+          <p class="muted">Shared reward recipes</p>
+        </div>
+        <button class="icon-action" title="New preset" data-action="new-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>+</button>
+      </div>
+      ${rewardSchemaReady ? "" : `<p class="muted">Using built-in fallback presets until Supabase schema is updated.</p>`}
+      <div class="preset-scroll">
+        ${state.snapshot.presets.map((item) => `
+        <button class="preset-button ${item.id === preset.id ? "active" : ""}" data-action="select-preset" data-id="${escapeHtml(item.id)}">
+          <strong>${escapeHtml(item.name)}</strong>
+          <small>${item.built_in ? "Built-in" : "Team preset"} · ${escapeHtml(formatRelativeTime(item.updated_at))}</small>
+        </button>`).join("") || empty("Apply the V2.1 schema to create presets.")}
+      </div>
+    </aside>
+  `;
+}
+
+function rewardHeader(preset, rewardSchemaReady, editable) {
+  return `
+    <div class="section-head reward-head">
+      <div>
+        <h2>Reward Tuning</h2>
+        <p class="muted">${escapeHtml(preset.built_in ? "Built-in preset. Duplicate it before editing." : editable ? "Editable team preset." : "Read-only preset.")}</p>
+      </div>
+      <div class="button-row reward-actions">
+        <button data-action="duplicate-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>Duplicate</button>
+        <button class="primary" data-action="save-preset" ${!editable ? "disabled" : ""}>Save Preset</button>
+      </div>
+    </div>
+  `;
+}
+
+function rewardGroup(group, preset, editable) {
+  return `
+    <section class="reward-group">
+      <h3>${escapeHtml(group.name)}</h3>
+      ${group.fields.map(([key, label, help]) => {
+        const value = Number(preset.values?.[key] ?? 0);
+        return rewardInputRow(key, label, help, value, editable);
+      }).join("")}
+    </section>`;
+}
+
+function rewardInputRow(key, label, help, value, editable) {
+  return `
+    <label class="reward-row">
+      <span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small><code>${escapeHtml(key)}</code></span>
+      <input class="reward-input" data-key="${escapeHtml(key)}" type="number" step="0.01" value="${escapeHtml(value)}" ${editable ? "" : "disabled"}>
+    </label>`;
 }
 
 function filteredRuns() {
@@ -442,10 +527,16 @@ function folders() {
 }
 
 function historyView() {
-  const run = selectedRun();
+  return historyLayout();
+}
+
+function historyLayout() {
   const runs = filteredRuns();
+  const selected = selectedRun();
+  const list = runs.map(runCardWithOptionalInlineDetails).join("") || empty("No matching runs.");
+  const phoneClass = state.isPhone ? "inline-history" : "";
   return `
-    <section class="history-layout">
+    <section class="history-layout ${phoneClass}">
       <aside class="panel run-list-panel">
         <div class="section-head compact">
           <h2>History</h2>
@@ -457,11 +548,9 @@ function historyView() {
           <option value="uncategorized" ${state.folderFilter === "uncategorized" ? "selected" : ""}>Uncategorized</option>
           ${folders().map((folder) => `<option value="${escapeHtml(folder)}" ${state.folderFilter === folder ? "selected" : ""}>${escapeHtml(folder)}</option>`).join("")}
         </select>
-        <div class="run-list">${runs.map(runCard).join("") || empty("No matching runs.")}</div>
+        <div class="run-list">${list}</div>
       </aside>
-      <article class="panel run-details">
-        ${run ? runDetails(run) : empty("Select a run.")}
-      </article>
+      ${state.isPhone ? "" : `<article class="panel run-details">${selected ? runDetails(selected, { context: "desktop" }) : empty("Select a run.")}</article>`}
     </section>
   `;
 }
@@ -482,6 +571,16 @@ function runCard(run) {
       <small>${escapeHtml(run.folder || "Uncategorized")} - ${escapeHtml(formatRelativeTime(run.created_at))}</small>
       <small>${run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"} - video ${escapeHtml(video.state)}${run.onnx_path ? " - ONNX" : ""}</small>
     </button>
+  `;
+}
+
+function runCardWithOptionalInlineDetails(run) {
+  const active = run.id === state.selectedRunId;
+  return `
+    <div class="run-card-wrap ${active ? "active" : ""}">
+      ${runCard(run)}
+      ${state.isPhone && active ? `<article class="inline-run-details">${runDetails(run, { context: "inline" })}</article>` : ""}
+    </div>
   `;
 }
 
@@ -539,12 +638,12 @@ function teamVideoSection(run) {
   `;
 }
 
-function runDetails(run) {
+function runDetails(run, { context = "desktop" } = {}) {
   const draft = currentRunDraft(run);
   const editable = canEditRun(role());
   const runnable = canOperate(role()) && Boolean(run.latest_checkpoint);
   return `
-    <div class="section-head">
+    <div class="section-head run-detail-head ${context === "inline" ? "inline" : ""}">
       <div>
         <h2 id="selected-run-title">${escapeHtml(run.display_name || run.id)}</h2>
         <p id="selected-run-id" class="muted">${escapeHtml(run.id)}</p>
@@ -659,22 +758,12 @@ function patchShellStatus() {
 }
 
 function patchDashboard() {
-  const machine = state.snapshot.targetMachine || state.snapshot.machine;
-  const healthGrid = document.querySelector("#health-grid");
-  if (healthGrid) {
-    healthGrid.innerHTML = healthChecks().map(([, label, ok, detail]) => `
-      <div class="health-card ${ok ? "ok" : "warn"}">
-        <span>${escapeHtml(label)}</span>
-        <strong>${ok ? "OK" : "Needs attention"}</strong>
-        <small>${escapeHtml(detail)}</small>
-      </div>`).join("");
-  }
-  const machineSlot = document.querySelector("#machine-card-slot");
-  if (machineSlot) machineSlot.innerHTML = machineCard(machine);
-  const queueSlot = document.querySelector("#queue-summary-slot");
-  if (queueSlot) queueSlot.innerHTML = jobSummary(state.snapshot.jobs.slice(0, 6));
-  const latestRuns = document.querySelector("#latest-runs-slot");
-  if (latestRuns) latestRuns.innerHTML = state.snapshot.runs.slice(0, 5).map(runCard).join("") || empty("No runs synced yet.");
+  const statusCards = document.querySelector("#dashboard-status-cards");
+  if (statusCards) statusCards.innerHTML = dashboardStatusCards();
+  const queueSlot = document.querySelector("#dashboard-queue-summary");
+  if (queueSlot) queueSlot.innerHTML = dashboardQueueSummary();
+  const latestRuns = document.querySelector("#dashboard-latest-runs");
+  if (latestRuns) latestRuns.innerHTML = dashboardLatestRuns();
 }
 
 function patchRunList() {
@@ -683,9 +772,32 @@ function patchRunList() {
   const panel = document.querySelector(".run-list-panel");
   const panelScrollTop = panel?.scrollTop || 0;
   const scrollTop = list.scrollTop;
-  list.innerHTML = filteredRuns().map(runCard).join("") || empty("No matching runs.");
+  const pageScrollTop = window.scrollY;
+  list.innerHTML = filteredRuns().map(runCardWithOptionalInlineDetails).join("") || empty("No matching runs.");
   list.scrollTop = scrollTop;
   if (panel) panel.scrollTop = panelScrollTop;
+  window.scrollTo({ top: pageScrollTop });
+}
+
+function patchRunCardsInPlace() {
+  document.querySelectorAll(".run-card").forEach((card) => {
+    const run = state.snapshot.runs.find((item) => item.id === card.dataset.id);
+    if (!run) return;
+    const video = videoStateForRun(run, state.snapshot.artifacts);
+    const active = run.id === state.selectedRunId;
+    card.classList.toggle("active", active);
+    card.closest(".run-card-wrap")?.classList.toggle("active", active);
+    const title = card.querySelector(".run-card-top strong");
+    if (title) title.textContent = run.display_name || run.id;
+    const badge = card.querySelector(".run-card-top .badge");
+    if (badge) {
+      badge.textContent = run.status || "unknown";
+      badge.className = `badge ${statusTone(run.status)}`;
+    }
+    const lines = card.querySelectorAll("small");
+    if (lines[0]) lines[0].textContent = `${run.folder || "Uncategorized"} - ${formatRelativeTime(run.created_at)}`;
+    if (lines[1]) lines[1].textContent = `${run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"} - video ${video.state}${run.onnx_path ? " - ONNX" : ""}`;
+  });
 }
 
 function isRunMetadataFocused() {
@@ -712,7 +824,7 @@ function patchTeamVideo(run) {
 }
 
 function patchSelectedRunDetails() {
-  const details = document.querySelector(".run-details");
+  const details = document.querySelector(".run-details, .inline-run-details");
   const run = selectedRun();
   if (!details || !run) return;
 
@@ -744,8 +856,15 @@ function patchSelectedRunDetails() {
   if (related) related.outerHTML = relatedJobsSection(run);
 }
 
-function patchHistory() {
-  patchRunList();
+function patchHistory({ forceList = false } = {}) {
+  if (!forceList && state.isPhone && document.querySelector(".inline-run-details")) {
+    patchRunCardsInPlace();
+    patchSelectedRunDetails();
+    return;
+  }
+  if (!isRunMetadataFocused()) {
+    patchRunList();
+  }
   patchSelectedRunDetails();
 }
 
@@ -893,6 +1012,19 @@ function render() {
   app.innerHTML = shell();
 }
 
+function handlePhoneModeChange(event) {
+  const nextIsPhone = Boolean(event.matches);
+  if (state.isPhone === nextIsPhone) return;
+  state.isPhone = nextIsPhone;
+  if (state.user) render();
+}
+
+if (PHONE_MEDIA.addEventListener) {
+  PHONE_MEDIA.addEventListener("change", handlePhoneModeChange);
+} else if (PHONE_MEDIA.addListener) {
+  PHONE_MEDIA.addListener(handlePhoneModeChange);
+}
+
 document.addEventListener("click", async (event) => {
   const target = event.target.closest("[data-action]");
   if (!target) return;
@@ -930,7 +1062,7 @@ document.addEventListener("click", async (event) => {
       state.selectedRunId = target.dataset.id;
       await ensureSelectedVideoSigned();
       if (state.view === "history") {
-        patchHistory();
+        patchHistory({ forceList: true });
         patchShellStatus();
         return;
       }

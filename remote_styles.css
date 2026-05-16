@@ -17,6 +17,8 @@
   --disabled-bg: #edf2f0;
   --disabled-text: #93a09e;
   --nav-bg: rgba(255, 255, 255, 0.72);
+  --active-bg: #172322;
+  --active-text: #ffffff;
   --notice-border: #b8d5dc;
   --notice-bg: #eaf7fa;
   --notice-text: #174e59;
@@ -48,6 +50,8 @@
   --disabled-bg: #18221f;
   --disabled-text: #70837e;
   --nav-bg: rgba(18, 26, 24, 0.82);
+  --active-bg: #55bfd0;
+  --active-text: #061110;
   --notice-border: #2f6872;
   --notice-bg: #10282d;
   --notice-text: #a5edf8;
@@ -265,6 +269,22 @@ video {
   font-size: clamp(19px, 2.3vw, 26px);
 }
 
+.welcome-banner.busy {
+  border-color: rgba(169, 93, 22, 0.45);
+  background: linear-gradient(135deg, var(--warning-bg), var(--panel));
+}
+
+.welcome-banner.warning {
+  border-color: rgba(179, 58, 54, 0.6);
+  background: linear-gradient(135deg, var(--danger-bg), var(--panel));
+  box-shadow: 0 14px 36px rgba(179, 58, 54, 0.16);
+}
+
+.welcome-banner.warning .eyebrow,
+.welcome-banner.warning .subcopy {
+  color: var(--bad);
+}
+
 .welcome-actions {
   display: flex;
   gap: 10px;
@@ -312,8 +332,9 @@ video {
 }
 
 .nav-tabs button.active {
-  background: var(--text);
-  color: white;
+  border-color: var(--active-bg);
+  background: var(--active-bg);
+  color: var(--active-text);
 }
 
 .panel {

@@ -401,19 +401,40 @@ function shell() {
   `;
 }
 
+const READY_MESSAGES = [
+  "The whegs are warmed up. Time to teach the robot a new trick.",
+  "Mission board is clear. RedRHex is waiting for its next adventure.",
+  "Mother says all systems are go. Let the little rover cook.",
+  "Training lane is open. Tiny legs, serious science.",
+  "The robot is caffeinated in spirit and ready in silicon.",
+  "Green lights across the board. Pick a reward and send it.",
+  "RedRHex is stretching dramatically. Queue the next run.",
+  "Fresh run energy detected. The lab is ready.",
+];
+
+function readyMessage(seed) {
+  let hash = 0;
+  for (const char of seed) hash = ((hash << 5) - hash + char.charCodeAt(0)) >>> 0;
+  return READY_MESSAGES[hash % READY_MESSAGES.length];
+}
+
 function welcomeBanner() {
   const machine = state.snapshot.targetMachine || state.snapshot.machine;
   const displayName = state.profile?.display_name || state.user?.email?.split("@")[0] || "teammate";
   const machineStatus = machineState(machine);
+  const isWarning = ["missing", "offline", "paused"].includes(machineStatus);
+  const bannerTone = isWarning ? "warning" : machineStatus === "busy" ? "busy" : "ready";
   const readyText = machineStatus === "ready"
-    ? "Mother is ready for the next run."
+    ? readyMessage(`${displayName}-${new Date().toDateString()}`)
     : machineStatus === "busy"
-      ? "Mother is busy, but you can still prepare the next job."
+      ? "Mother is busy right now. You can prepare the next job, but launch may wait for the GPU."
       : machineStatus === "paused"
-        ? "Remote launch is paused in mother."
-        : "Check Connection to verify the remote link.";
+        ? "WARNING: Remote launch is paused in mother. Jobs will not start until mother accepts them."
+        : machineStatus === "offline"
+          ? "WARNING: Mother looks offline. Check the worker before queuing training."
+          : "WARNING: No training machine is connected. Open Connection and verify the worker.";
   return `
-    <section class="welcome-banner">
+    <section class="welcome-banner ${bannerTone}">
       <div>
         <p class="eyebrow">Welcome</p>
         <h2>Hi ${escapeHtml(displayName)}, where should RedRHex go next?</h2>

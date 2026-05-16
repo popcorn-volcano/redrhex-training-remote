@@ -84,6 +84,11 @@ export const REWARD_FIELDS = [
   },
 ];
 
+export const ACTIVE_JOB_STATUSES = new Set(["queued", "claimed", "running"]);
+export const GPU_JOB_TYPES = new Set(["start_training", "record_video", "export_onnx"]);
+export const ACTIVE_REFRESH_MS = 3_000;
+export const IDLE_REFRESH_MS = 15_000;
+
 export function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -134,11 +139,72 @@ export function statusTone(status) {
   return "muted";
 }
 
+export function hasActiveRemoteWork(snapshot = {}) {
+  const jobs = Array.isArray(snapshot.jobs) ? snapshot.jobs : [];
+  const machine = snapshot.targetMachine || snapshot.machine || null;
+  return Boolean(machine?.gpu_locked) || jobs.some((job) => ACTIVE_JOB_STATUSES.has(String(job.status || "").toLowerCase()));
+}
+
+export function refreshDelayForSnapshot(snapshot = {}) {
+  return hasActiveRemoteWork(snapshot) ? ACTIVE_REFRESH_MS : IDLE_REFRESH_MS;
+}
+
+export function jobQueueLabel(job = {}, machine = null) {
+  const status = String(job.status || "").toLowerCase();
+  const type = String(job.type || "");
+  if (status === "queued") {
+    if (!machine) return "waiting for worker";
+    if (!isMachineFresh(machine)) return "waiting for worker heartbeat";
+    if (!machine.accept_jobs) return "worker paused";
+    if (machine.gpu_locked && GPU_JOB_TYPES.has(type)) return "waiting for GPU";
+    return "waiting for worker";
+  }
+  if (status === "claimed") return "claimed by worker";
+  if (status === "running") return "running";
+  if (status === "failed") return job.error || "failed";
+  if (status === "completed") return "completed";
+  return status || "unknown";
+}
+
 export function latestVideoArtifact(runId, artifacts = []) {
   const matches = artifacts
     .filter((artifact) => artifact.run_id === runId && artifact.kind === "video" && artifact.storage_path)
     .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
   return matches[0] || null;
+}
+
+export function hasAnyVideoRecord(run = {}, artifacts = []) {
+  return Boolean(run.latest_video) || artifacts.some((artifact) => artifact.run_id === run.id && artifact.kind === "video");
+}
+
+export function videoStateForRun(run = {}, artifacts = []) {
+  const artifact = latestVideoArtifact(run.id, artifacts);
+  if (artifact) return { state: "ready", artifact };
+  if (hasAnyVideoRecord(run, artifacts)) return { state: "uploading", artifact: null };
+  if (run.latest_checkpoint) return { state: "recordable", artifact: null };
+  return { state: "missing", artifact: null };
+}
+
+export function buildRunMetadataPatch({ displayName = "", folder = "", notes = "", now = new Date() } = {}) {
+  const nameValue = String(displayName || "").trim();
+  const folderValue = String(folder || "").trim();
+  return {
+    display_name: nameValue || null,
+    folder: folderValue || null,
+    notes: String(notes || ""),
+    updated_at: now.toISOString(),
+  };
+}
+
+export function friendlyErrorMessage(error) {
+  const message = error?.message || String(error || "");
+  if (/schema cache|could not find.*schema|could not find the table/i.test(message)) {
+    return `${message} Apply the latest schema.sql in Supabase, then reload the PostgREST schema cache.`;
+  }
+  if (/storage|bucket|signed.*url|object/i.test(message)) {
+    return `${message} Check the private redrhex-videos bucket and storage policies.`;
+  }
+  return message;
 }
 
 export function formatRelativeTime(iso, now = Date.now()) {

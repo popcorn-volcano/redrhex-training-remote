@@ -12,18 +12,23 @@ import {
 } from "./api.js";
 import {
   REWARD_FIELDS,
+  buildRunMetadataPatch,
   buildActionJob,
   buildTrainingJob,
   canEditPreset,
   canEditRun,
   canOperate,
   escapeHtml,
+  friendlyErrorMessage,
   formatRelativeTime,
-  latestVideoArtifact,
+  hasActiveRemoteWork,
+  jobQueueLabel,
   machineState,
   normalizePreset,
+  refreshDelayForSnapshot,
   slugify,
   statusTone,
+  videoStateForRun,
 } from "./core.js";
 
 const state = {
@@ -46,9 +51,13 @@ const state = {
   runSearch: "",
   folderFilter: "all",
   signedVideos: {},
+  runDrafts: {},
   message: "",
   loading: false,
   loadError: "",
+  lastUpdated: "",
+  refreshTimer: null,
+  refreshing: false,
 };
 
 const app = document.querySelector("#app");
@@ -77,23 +86,73 @@ function setView(view) {
   render();
 }
 
-async function refresh() {
+function scheduleRefresh() {
+  if (state.refreshTimer) clearTimeout(state.refreshTimer);
+  if (!state.user || document.hidden) return;
+  const delay = refreshDelayForSnapshot(state.snapshot);
+  state.refreshTimer = setTimeout(() => {
+    refresh({ silent: true }).catch((error) => {
+      state.loadError = friendlyErrorMessage(error);
+      render();
+      scheduleRefresh();
+    });
+  }, delay);
+}
+
+function currentRunDraft(run) {
+  if (!run) return {};
+  return state.runDrafts[run.id] || {};
+}
+
+function signedVideoEntry(storagePath) {
+  const entry = state.signedVideos[storagePath];
+  if (!entry) return null;
+  if (typeof entry === "string") return { url: entry, expiresAt: 0 };
+  return entry;
+}
+
+async function ensureSelectedVideoSigned() {
+  const run = selectedRun();
+  if (!run) return;
+  const video = videoStateForRun(run, state.snapshot.artifacts);
+  const storagePath = video.artifact?.storage_path;
+  if (!storagePath) return;
+  const existing = signedVideoEntry(storagePath);
+  if (existing?.url && existing.expiresAt && existing.expiresAt - Date.now() > 5 * 60_000) return;
+  try {
+    state.signedVideos[storagePath] = {
+      url: await createSignedVideoUrl(storagePath),
+      expiresAt: Date.now() + 55 * 60_000,
+    };
+  } catch (error) {
+    state.message = friendlyErrorMessage(error);
+  }
+}
+
+async function refresh(options = {}) {
   if (!state.user) return;
-  state.loading = true;
+  if (state.refreshing) return;
+  state.refreshing = true;
+  const silent = Boolean(options.silent);
+  if (!silent) state.loading = true;
   state.loadError = "";
-  render();
+  if (!silent) render();
   try {
     state.snapshot = await loadRemoteSnapshot(state.machineId);
     state.snapshot.presets = state.snapshot.presets.map(normalizePreset);
     if (!state.selectedRunId && state.snapshot.runs[0]) state.selectedRunId = state.snapshot.runs[0].id;
     if (!state.snapshot.presets.find((preset) => preset.id === state.selectedPresetId) && state.snapshot.presets[0]) {
-      state.selectedPresetId = state.snapshot.presets[0].id;
+        state.selectedPresetId = state.snapshot.presets[0].id;
     }
+    state.lastUpdated = new Date().toISOString();
+    await ensureSelectedVideoSigned();
   } catch (error) {
-    state.loadError = error.message;
+    state.loadError = friendlyErrorMessage(error);
   } finally {
     state.loading = false;
+    state.refreshing = false;
     render();
+    scheduleRefresh();
   }
 }
 
@@ -147,6 +206,8 @@ function shell() {
       <div class="top-status">
         <span class="badge ${tone}">${escapeHtml(machineState(machine))}</span>
         <span class="badge">${escapeHtml(role())}</span>
+        ${state.lastUpdated ? `<span class="badge">Updated ${escapeHtml(formatRelativeTime(state.lastUpdated))}</span>` : ""}
+        ${hasActiveRemoteWork(state.snapshot) ? `<span class="badge info">Auto-refresh 3s</span>` : `<span class="badge">Auto-refresh 15s</span>`}
       </div>
     </header>
     <nav class="nav-tabs">
@@ -242,10 +303,12 @@ function machineCard(machine) {
 
 function jobSummary(jobs) {
   if (!jobs.length) return empty("No recent jobs.");
+  const machine = state.snapshot.targetMachine || state.snapshot.machine;
   return `<div class="mini-list">${jobs.map((job) => `
     <div>
       <strong>${escapeHtml(job.type)}</strong>
       <span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span>
+      <small>${escapeHtml(jobQueueLabel(job, machine))}</small>
       <small>${escapeHtml(formatRelativeTime(job.created_at))}</small>
     </div>`).join("")}</div>`;
 }
@@ -387,7 +450,7 @@ function renderRunListOnly() {
 }
 
 function runCard(run) {
-  const videoArtifact = latestVideoArtifact(run.id, state.snapshot.artifacts);
+  const video = videoStateForRun(run, state.snapshot.artifacts);
   const active = run.id === state.selectedRunId;
   return `
     <button class="run-card ${active ? "active" : ""}" data-action="select-run" data-id="${escapeHtml(run.id)}">
@@ -396,14 +459,16 @@ function runCard(run) {
         <span class="badge ${statusTone(run.status)}">${escapeHtml(run.status || "unknown")}</span>
       </span>
       <small>${escapeHtml(run.folder || "Uncategorized")} - ${escapeHtml(formatRelativeTime(run.created_at))}</small>
-      <small>${run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"}${videoArtifact ? " - team video" : ""}${run.onnx_path ? " - ONNX" : ""}</small>
+      <small>${run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"} - video ${escapeHtml(video.state)}${run.onnx_path ? " - ONNX" : ""}</small>
     </button>
   `;
 }
 
 function runDetails(run) {
-  const videoArtifact = latestVideoArtifact(run.id, state.snapshot.artifacts);
-  const signed = videoArtifact ? state.signedVideos[videoArtifact.storage_path] : "";
+  const video = videoStateForRun(run, state.snapshot.artifacts);
+  const videoArtifact = video.artifact;
+  const signed = videoArtifact ? signedVideoEntry(videoArtifact.storage_path)?.url || "" : "";
+  const draft = currentRunDraft(run);
   const editable = canEditRun(role());
   const runnable = canOperate(role()) && Boolean(run.latest_checkpoint);
   const relatedJobs = state.snapshot.jobs.filter((job) => {
@@ -421,25 +486,30 @@ function runDetails(run) {
     </div>
     <div class="details-grid">
       <div><span>Checkpoint</span><strong>${run.latest_checkpoint ? "ready" : "missing"}</strong></div>
-      <div><span>Video</span><strong>${videoArtifact ? "team-ready" : run.latest_video ? "local only" : "missing"}</strong></div>
+      <div><span>Video</span><strong>${escapeHtml(video.state)}</strong></div>
       <div><span>ONNX</span><strong>${run.onnx_path ? "ready" : "missing"}</strong></div>
       <div><span>Updated</span><strong>${escapeHtml(formatRelativeTime(run.updated_at || run.created_at))}</strong></div>
     </div>
     <section class="subpanel">
       <h3>Run Metadata</h3>
-      <label>Name <input id="run-name" value="${escapeHtml(run.display_name || "")}" ${editable ? "" : "disabled"}></label>
-      <label>Folder <input id="run-folder" value="${escapeHtml(run.folder || "")}" placeholder="e.g. gait tests" ${editable ? "" : "disabled"}></label>
-      <label>Notes <textarea id="run-notes" ${editable ? "" : "disabled"}>${escapeHtml(run.notes || "")}</textarea></label>
+      <label>Name <input id="run-name" value="${escapeHtml(draft.display_name ?? run.display_name ?? "")}" ${editable ? "" : "disabled"}></label>
+      <label>Folder <input id="run-folder" value="${escapeHtml(draft.folder ?? run.folder ?? "")}" placeholder="e.g. gait tests" ${editable ? "" : "disabled"}></label>
+      <label>Notes <textarea id="run-notes" ${editable ? "" : "disabled"}>${escapeHtml(draft.notes ?? run.notes ?? "")}</textarea></label>
       <button data-action="save-run" ${editable ? "" : "disabled"}>Save Notes / Folder</button>
     </section>
     <section class="subpanel">
       <h3>Team Video</h3>
-      ${videoArtifact ? `
-        ${signed ? `<video controls src="${escapeHtml(signed)}"></video>` : `<p class="muted">Video is stored privately. Load a signed team-only link when you want to watch it.</p>`}
+      ${video.state === "ready" ? `
+        ${signed ? `<video controls src="${escapeHtml(signed)}"></video>` : `<p class="muted">Preparing a signed team-only video link...</p>`}
         <div class="button-row">
           <button data-action="load-video" data-path="${escapeHtml(videoArtifact.storage_path)}">Load Video</button>
           <button data-action="copy-video-path" data-path="${escapeHtml(videoArtifact.storage_path)}">Copy Storage Path</button>
-        </div>` : `<p class="muted">No uploaded team video yet. Queue recording from this run after a checkpoint exists.</p>`}
+        </div>` : video.state === "uploading" ? `
+        <p class="muted">Video exists locally and is uploading to team storage. This panel will refresh automatically.</p>
+      ` : video.state === "recordable" ? `
+        <p class="muted">No team video yet. Record one from the latest checkpoint.</p>
+        <button class="primary" data-action="job-record-video" ${runnable ? "" : "disabled"}>Record Video</button>
+      ` : `<p class="muted">No checkpoint yet, so video recording is not available.</p>`}
     </section>
     <section class="subpanel">
       <h3>Safe Remote Actions</h3>
@@ -452,7 +522,7 @@ function runDetails(run) {
     <section class="subpanel">
       <h3>Related Jobs</h3>
       ${relatedJobs.length ? `<div class="mini-list">${relatedJobs.map((job) => `
-        <div><strong>${escapeHtml(job.type)}</strong><span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span><small>${escapeHtml(formatRelativeTime(job.created_at))}</small></div>
+        <div><strong>${escapeHtml(job.type)}</strong><span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span><small>${escapeHtml(jobQueueLabel(job, state.snapshot.targetMachine || state.snapshot.machine))}</small><small>${escapeHtml(formatRelativeTime(job.created_at))}</small></div>
       `).join("")}</div>` : empty("No remote jobs linked to this run yet.")}
     </section>
   `;
@@ -590,15 +660,15 @@ function newPreset() {
 async function saveRun() {
   const run = selectedRun();
   if (!run) return;
+  const displayName = (document.querySelector("#run-name")?.value || "").trim();
+  const folder = (document.querySelector("#run-folder")?.value || "").trim();
+  const notes = document.querySelector("#run-notes")?.value || "";
   await update(
     "runs",
     `id=eq.${encodeURIComponent(run.id)}`,
-    {
-      display_name: document.querySelector("#run-name")?.value || null,
-      folder: document.querySelector("#run-folder")?.value || null,
-      notes: document.querySelector("#run-notes")?.value || "",
-    },
+    buildRunMetadataPatch({ displayName, folder, notes }),
   );
+  delete state.runDrafts[run.id];
   await refresh();
   setMessage("Run metadata saved.");
 }
@@ -613,7 +683,10 @@ async function queueRunAction(type, message) {
 }
 
 async function loadVideo(storagePath) {
-  state.signedVideos[storagePath] = await createSignedVideoUrl(storagePath);
+  state.signedVideos[storagePath] = {
+    url: await createSignedVideoUrl(storagePath),
+    expiresAt: Date.now() + 55 * 60_000,
+  };
   render();
 }
 
@@ -634,6 +707,7 @@ document.addEventListener("click", async (event) => {
       await signOut();
       state.user = null;
       state.profile = null;
+      if (state.refreshTimer) clearTimeout(state.refreshTimer);
       setMessage("Signed out.");
       return;
     }
@@ -655,6 +729,7 @@ document.addEventListener("click", async (event) => {
     if (action === "save-preset") return await savePreset();
     if (action === "select-run") {
       state.selectedRunId = target.dataset.id;
+      await ensureSelectedVideoSigned();
       return render();
     }
     if (action === "save-run") return await saveRun();
@@ -667,7 +742,7 @@ document.addEventListener("click", async (event) => {
     if (action === "job-export-onnx") return await queueRunAction("export_onnx", "Queued ONNX export.");
     if (action === "job-stop") return await queueRunAction("stop_process", "Queued stop request.");
   } catch (error) {
-    setMessage(error.message);
+    setMessage(friendlyErrorMessage(error));
   }
 });
 
@@ -688,12 +763,41 @@ document.addEventListener("input", (event) => {
     state.runSearch = event.target.value;
     renderRunListOnly();
   }
+  if (["run-name", "run-folder", "run-notes"].includes(event.target.id)) {
+    const run = selectedRun();
+    if (run) {
+      state.runDrafts[run.id] = {
+        ...state.runDrafts[run.id],
+        display_name: document.querySelector("#run-name")?.value ?? run.display_name ?? "",
+        folder: document.querySelector("#run-folder")?.value ?? run.folder ?? "",
+        notes: document.querySelector("#run-notes")?.value ?? run.notes ?? "",
+      };
+    }
+  }
+  if (event.target.id === "preset-name" && state.draftPreset) {
+    state.draftPreset.name = event.target.value;
+  }
+  if (event.target.id === "preset-description" && state.draftPreset) {
+    state.draftPreset.description = event.target.value;
+  }
   if (event.target.classList.contains("reward-input") && state.draftPreset) {
     state.draftPreset.values[event.target.dataset.key] = Number(event.target.value || 0);
   }
 });
 
 boot().catch((error) => {
-  state.loadError = error.message;
+  state.loadError = friendlyErrorMessage(error);
   render();
+});
+
+window.addEventListener("focus", () => {
+  if (state.user) refresh({ silent: true }).catch((error) => setMessage(friendlyErrorMessage(error)));
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && state.user) {
+    refresh({ silent: true }).catch((error) => setMessage(friendlyErrorMessage(error)));
+  } else if (state.refreshTimer) {
+    clearTimeout(state.refreshTimer);
+  }
 });

@@ -1,5 +1,42 @@
 import { HEARTBEAT_STALE_MS } from "./config.js";
 
+export const BUILT_IN_REWARD_PRESETS = [
+  {
+    id: "baseline",
+    name: "Baseline",
+    description: "The current default reward configuration. Good starting point for comparison runs.",
+    values: {},
+    built_in: true,
+  },
+  {
+    id: "speed-focus",
+    name: "Speed Focus",
+    description: "Emphasises forward velocity and tracking. Faster but may be less stable.",
+    values: {
+      rew_scale_forward_vel: 5.0,
+      rew_scale_vel_tracking: 6.0,
+      rew_scale_ang_vel_tracking: 3.5,
+      rew_scale_orientation: -0.1,
+      rew_scale_base_height: -0.1,
+    },
+    built_in: true,
+  },
+  {
+    id: "stability-focus",
+    name: "Stability Focus",
+    description: "Strongly penalises tilting and height deviation for early stability.",
+    values: {
+      rew_scale_forward_vel: 1.5,
+      rew_scale_vel_tracking: 2.0,
+      rew_scale_orientation: -0.6,
+      rew_scale_base_height: -0.6,
+      rew_scale_lin_vel_z: -0.3,
+      rew_scale_alive: 0.3,
+    },
+    built_in: true,
+  },
+];
+
 export const REWARD_FIELDS = [
   {
     name: "Locomotion Goals",
@@ -153,4 +190,3 @@ export function normalizePreset(raw) {
     updated_at: raw?.updated_at || raw?.created_at || "",
   };
 }
-

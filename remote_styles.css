@@ -223,6 +223,12 @@ video {
   color: var(--bad);
 }
 
+.notice.warning {
+  border-color: #e7c590;
+  background: #fff7e8;
+  color: var(--warn);
+}
+
 .primary {
   border-color: var(--accent);
   background: var(--accent);

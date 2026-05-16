@@ -38,6 +38,7 @@ const state = {
     runs: [],
     artifacts: [],
     presets: [],
+    schema: { artifacts: true, rewardPresets: true, warnings: [] },
   },
   selectedPresetId: localStorage.getItem("redrhex_child_preset") || "baseline",
   draftPreset: null,
@@ -121,7 +122,8 @@ function healthChecks() {
     ["machine", "Machine heartbeat", machineStatus !== "missing" && machineStatus !== "offline", machine?.heartbeat_at ? `${machine.machine_id} - ${formatRelativeTime(machine.heartbeat_at)}` : "No heartbeat"],
     ["accept", "Worker accepting jobs", Boolean(machine?.accept_jobs), machine?.accept_jobs ? "Ready to queue" : "Paused by mother panel"],
     ["gpu", "GPU lock", !machine?.gpu_locked, machine?.gpu_locked ? "Busy" : "Free"],
-    ["video", "Video storage", Array.isArray(state.snapshot.artifacts), "Private signed playback enabled after schema update"],
+    ["rewards", "Reward preset schema", Boolean(state.snapshot.schema?.rewardPresets), state.snapshot.schema?.rewardPresets ? "Shared presets ready" : "Apply schema.sql in Supabase"],
+    ["video", "Video storage", Boolean(state.snapshot.schema?.artifacts), state.snapshot.schema?.artifacts ? "Private signed playback ready" : "Apply schema.sql in Supabase"],
   ];
 }
 
@@ -151,6 +153,7 @@ function shell() {
       ${views.map(([id, label]) => `<button class="${state.view === id ? "active" : ""}" data-action="view" data-view="${id}">${label}</button>`).join("")}
     </nav>
     ${state.message ? `<div class="notice">${escapeHtml(state.message)}</div>` : ""}
+    ${(state.snapshot.schema?.warnings || []).map((warning) => `<div class="notice warning">${escapeHtml(warning)}</div>`).join("")}
     ${state.loadError ? `<div class="notice danger">${escapeHtml(state.loadError)}</div>` : ""}
     ${state.user ? page() : loginPage()}
   `;
@@ -289,14 +292,16 @@ function rewardSnapshot(values) {
 
 function rewardsView() {
   const preset = state.draftPreset || selectedPreset();
-  const editable = canEditPreset(role()) && !preset.built_in;
+  const rewardSchemaReady = Boolean(state.snapshot.schema?.rewardPresets);
+  const editable = rewardSchemaReady && canEditPreset(role()) && !preset.built_in;
   return `
     <section class="split-grid rewards-layout">
       <aside class="panel preset-list">
         <div class="section-head compact">
           <h2>Shared Presets</h2>
-          <button data-action="new-preset" ${!canEditPreset(role()) ? "disabled" : ""}>New</button>
+          <button data-action="new-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>New</button>
         </div>
+        ${rewardSchemaReady ? "" : `<p class="muted">Using built-in fallback presets until Supabase schema is updated.</p>`}
         ${state.snapshot.presets.map((item) => `
           <button class="preset-button ${item.id === preset.id ? "active" : ""}" data-action="select-preset" data-id="${escapeHtml(item.id)}">
             <strong>${escapeHtml(item.name)}</strong>
@@ -310,7 +315,7 @@ function rewardsView() {
             <p class="muted">Operators and admins can save team presets. Viewers can inspect snapshots.</p>
           </div>
           <div class="button-row">
-            <button data-action="duplicate-preset" ${!canEditPreset(role()) ? "disabled" : ""}>Duplicate</button>
+            <button data-action="duplicate-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>Duplicate</button>
             <button class="primary" data-action="save-preset" ${!editable ? "disabled" : ""}>Save Preset</button>
           </div>
         </div>

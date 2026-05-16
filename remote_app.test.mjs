@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  BUILT_IN_REWARD_PRESETS,
   buildTrainingJob,
   canOperate,
   isMachineFresh,
@@ -49,3 +50,7 @@ test("slugify returns stable storage-safe ids", () => {
   assert.equal(slugify("Speed Focus Copy"), "speed-focus-copy");
 });
 
+test("built-in preset fallback keeps training usable before schema update", () => {
+  assert.equal(BUILT_IN_REWARD_PRESETS.length >= 3, true);
+  assert.equal(BUILT_IN_REWARD_PRESETS[0].id, "baseline");
+});

@@ -32,3 +32,8 @@ Before using the new Rewards/Video features, apply the latest mother schema:
 tools/training_panel/supabase/schema.sql
 ```
 
+If the page says `Could not find the table 'public.reward_presets' in the schema cache`, the Supabase project has not loaded the latest schema yet. Re-run the full schema SQL in Supabase SQL Editor. If you just created the table and still see the message, run this in SQL Editor once to refresh PostgREST:
+
+```sql
+notify pgrst, 'reload schema';
+```

@@ -1,4 +1,5 @@
 import { SUPABASE_ANON_KEY, SUPABASE_URL, VIDEO_BUCKET } from "./config.js";
+import { BUILT_IN_REWARD_PRESETS } from "./core.js";
 
 const TOKEN_KEY = "redrhex_child_access_token";
 const REFRESH_KEY = "redrhex_child_refresh_token";
@@ -89,6 +90,14 @@ export async function select(table, query = "") {
   return supabaseFetch(`/rest/v1/${table}${suffix}`);
 }
 
+async function optionalSelect(table, query = "") {
+  try {
+    return { rows: await select(table, query), ok: true, error: "" };
+  } catch (error) {
+    return { rows: [], ok: false, error: error.message || String(error) };
+  }
+}
+
 export async function insert(table, payload) {
   return supabaseFetch(`/rest/v1/${table}`, {
     method: "POST",
@@ -132,13 +141,15 @@ export async function createSignedVideoUrl(storagePath, expiresIn = 3600) {
 
 export async function loadRemoteSnapshot(machineId) {
   const encodedMachine = encodeURIComponent(machineId);
-  const [machines, jobs, runs, artifacts, presets] = await Promise.all([
+  const [machines, jobs, runs, artifactsResult, presetsResult] = await Promise.all([
     select("machines", `select=*&order=heartbeat_at.desc`),
     select("jobs", `select=*&order=created_at.desc&limit=60`),
     select("runs", `select=*&order=created_at.desc&limit=120`),
-    select("artifacts", `select=*&order=created_at.desc&limit=200`),
-    select("reward_presets", `select=*&order=built_in.desc,updated_at.desc,name.asc`),
+    optionalSelect("artifacts", `select=*&order=created_at.desc&limit=200`),
+    optionalSelect("reward_presets", `select=*&order=built_in.desc,updated_at.desc,name.asc`),
   ]);
+  const artifacts = artifactsResult.rows;
+  const presets = presetsResult.ok ? presetsResult.rows : BUILT_IN_REWARD_PRESETS;
   return {
     machines,
     machine: machines.find((machine) => machine.machine_id === machineId) || machines[0] || null,
@@ -148,6 +159,13 @@ export async function loadRemoteSnapshot(machineId) {
     artifacts: artifacts.filter((artifact) => !artifact.machine_id || artifact.machine_id === machineId || machineId === ""),
     presets,
     encodedMachine,
+    schema: {
+      artifacts: artifactsResult.ok,
+      rewardPresets: presetsResult.ok,
+      warnings: [
+        artifactsResult.ok ? "" : `Artifacts table unavailable: ${artifactsResult.error}`,
+        presetsResult.ok ? "" : `Reward presets table unavailable: ${presetsResult.error}`,
+      ].filter(Boolean),
+    },
   };
 }
-

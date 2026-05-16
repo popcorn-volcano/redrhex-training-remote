@@ -1,7 +1,11 @@
+const REDRHEX_SUPABASE_URL = "https://tqvopodmsprhujyagaan.supabase.co";
+const REDRHEX_SUPABASE_ANON_KEY = "sb_publishable_gTVhR0oihwopq3LZhSTszA_K4W6S5AU";
+const DEFAULT_MACHINE_ID = "biorolapc2-ubuntu";
+
 const state = {
-  supabaseUrl: localStorage.getItem("redrhex_supabase_url") || "",
-  anonKey: localStorage.getItem("redrhex_supabase_anon_key") || "",
-  machineId: localStorage.getItem("redrhex_machine_id") || "",
+  supabaseUrl: REDRHEX_SUPABASE_URL,
+  anonKey: REDRHEX_SUPABASE_ANON_KEY,
+  machineId: localStorage.getItem("redrhex_machine_id") || DEFAULT_MACHINE_ID,
   accessToken: sessionStorage.getItem("redrhex_access_token") || "",
   profile: null,
 };
@@ -21,24 +25,19 @@ function escapeHtml(value) {
 }
 
 function hydrateForm() {
-  $("#supabase-url").value = state.supabaseUrl;
-  $("#supabase-anon-key").value = state.anonKey;
   $("#machine-id").value = state.machineId;
   $("#session-status").textContent = state.accessToken ? "Token saved" : "Signed out";
+  $("#project-status").textContent = `Connected to ${new URL(state.supabaseUrl).host}`;
 }
 
 function saveConfig() {
-  state.supabaseUrl = $("#supabase-url").value.replace(/\/$/, "");
-  state.anonKey = $("#supabase-anon-key").value;
   state.machineId = $("#machine-id").value;
-  localStorage.setItem("redrhex_supabase_url", state.supabaseUrl);
-  localStorage.setItem("redrhex_supabase_anon_key", state.anonKey);
   localStorage.setItem("redrhex_machine_id", state.machineId);
-  status("Remote config saved in this browser.");
+  status("Machine target saved in this browser.");
 }
 
 async function supabaseFetch(path, options = {}) {
-  if (!state.supabaseUrl || !state.anonKey) throw new Error("Configure Supabase URL and anon key first.");
+  if (!state.supabaseUrl || !state.anonKey) throw new Error("Remote Supabase project is not configured.");
   const response = await fetch(`${state.supabaseUrl}${path}`, {
     headers: {
       apikey: state.anonKey,
@@ -133,7 +132,6 @@ async function refreshAll() {
     </div>`);
 }
 
-$("#save-config").addEventListener("click", saveConfig);
 $("#login").addEventListener("click", () => login().catch((error) => status(error.message)));
 $("#queue-training").addEventListener("click", () => queueTraining().catch((error) => status(error.message)));
 $("#refresh").addEventListener("click", () => refreshAll().catch((error) => status(error.message)));

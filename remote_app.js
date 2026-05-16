@@ -1098,6 +1098,156 @@ function runDetailsGrid(run) {
   `;
 }
 
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function rewardFieldMeta() {
+  const meta = new Map();
+  for (const group of REWARD_FIELDS) {
+    for (const [key, label, help] of group.fields) {
+      meta.set(key, { key, label, help, group: group.name });
+    }
+  }
+  return meta;
+}
+
+function rewardPresetById(presetId) {
+  const id = String(presetId || "baseline");
+  return state.snapshot.presets.map(normalizePreset).find((preset) => String(preset.id) === id) || null;
+}
+
+function runRewardPresetId(run) {
+  const params = plainObject(run.params);
+  return String(params.reward_preset_id || run.reward_preset_id || "baseline");
+}
+
+function rewardSnapshotForRun(run) {
+  const params = plainObject(run.params);
+  const paramOverrides = plainObject(params.reward_overrides);
+  if (Object.keys(paramOverrides).length) return paramOverrides;
+  const runOverrides = plainObject(run.reward_overrides);
+  if (Object.keys(runOverrides).length) return runOverrides;
+  return plainObject(rewardPresetById(runRewardPresetId(run))?.values);
+}
+
+function rewardBaselineValues() {
+  return plainObject(rewardPresetById("baseline")?.values);
+}
+
+function rewardNumber(value) {
+  const num = Number(value ?? 0);
+  return Number.isFinite(num) ? num : value;
+}
+
+function rewardValuesEqual(left, right) {
+  const leftNum = Number(left ?? 0);
+  const rightNum = Number(right ?? 0);
+  if (Number.isFinite(leftNum) && Number.isFinite(rightNum)) {
+    return Math.abs(leftNum - rightNum) < 1e-9;
+  }
+  return String(left ?? "") === String(right ?? "");
+}
+
+function formatRewardNumber(value) {
+  const num = Number(value ?? 0);
+  if (!Number.isFinite(num)) return String(value ?? "");
+  if (Number.isInteger(num)) return String(num);
+  return num.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function rewardDeltaLabel(value, baseline) {
+  const valueNum = Number(value ?? 0);
+  const baselineNum = Number(baseline ?? 0);
+  if (!Number.isFinite(valueNum) || !Number.isFinite(baselineNum)) return "";
+  const delta = valueNum - baselineNum;
+  if (Math.abs(delta) < 1e-9) return "same";
+  const pct = Math.abs(baselineNum) > 1e-9 ? ` · ${Math.round((delta / Math.abs(baselineNum)) * 100)}%` : "";
+  return `${delta > 0 ? "+" : ""}${formatRewardNumber(delta)}${pct}`;
+}
+
+function rewardComparisonRows(run) {
+  const meta = rewardFieldMeta();
+  const snapshot = rewardSnapshotForRun(run);
+  const baseline = rewardBaselineValues();
+  const knownKeys = REWARD_FIELDS.flatMap((group) => group.fields.map(([key]) => key));
+  const keys = [...new Set([...knownKeys, ...Object.keys(snapshot), ...Object.keys(baseline)])];
+  return keys
+    .map((key) => {
+      const field = meta.get(key) || { key, label: key, help: "", group: "Other" };
+      const value = rewardNumber(snapshot[key] ?? 0);
+      const base = rewardNumber(baseline[key] ?? 0);
+      const valueNum = Number(value ?? 0);
+      const baseNum = Number(base ?? 0);
+      const delta = Number.isFinite(valueNum) && Number.isFinite(baseNum) ? valueNum - baseNum : null;
+      return { ...field, value, baseline: base, delta };
+    })
+    .filter((row) => !rewardValuesEqual(row.value, row.baseline));
+}
+
+function rewardComparisonSection(run) {
+  const rows = rewardComparisonRows(run);
+  const presetId = runRewardPresetId(run);
+  const preset = rewardPresetById(presetId);
+  const baseline = rewardPresetById("baseline");
+  const groups = REWARD_FIELDS
+    .map((group) => ({ name: group.name, rows: rows.filter((row) => row.group === group.name) }))
+    .filter((group) => group.rows.length);
+  const otherRows = rows.filter((row) => !REWARD_FIELDS.some((group) => group.name === row.group));
+  if (otherRows.length) groups.push({ name: "Other", rows: otherRows });
+  return `
+    <section id="reward-comparison-panel" class="subpanel reward-comparison-panel">
+      <div class="section-head compact">
+        <div>
+          <h3>Reward Comparison</h3>
+          <p class="muted">Run snapshot compared with ${escapeHtml(baseline?.name || "Baseline")}.</p>
+        </div>
+        <span class="badge">${rows.length} changed</span>
+      </div>
+      <div class="reward-compare-summary">
+        <span><strong>Run preset</strong>${escapeHtml(preset?.name || presetId)}</span>
+        <span><strong>Baseline</strong>${escapeHtml(baseline?.name || "Baseline")}</span>
+      </div>
+      ${rows.length ? groups.map((group, index) => `
+        <details class="reward-compare-group" data-group="${escapeHtml(group.name)}" ${index === 0 ? "open" : ""}>
+          <summary><span>${escapeHtml(group.name)}</span><em>${group.rows.length}</em></summary>
+          <div class="reward-compare-list">
+            ${group.rows.map(rewardComparisonRow).join("")}
+          </div>
+        </details>
+      `).join("") : empty("No reward changes are recorded for this run.")}
+    </section>
+  `;
+}
+
+function rewardComparisonRow(row) {
+  const dir = row.delta === null ? "" : row.delta > 0 ? "up" : "down";
+  return `
+    <div class="reward-compare-row">
+      <span class="reward-compare-name">
+        <strong>${escapeHtml(row.label)}</strong>
+        <small>${escapeHtml(row.key)}</small>
+      </span>
+      <span><small>Baseline</small><strong>${escapeHtml(formatRewardNumber(row.baseline))}</strong></span>
+      <span><small>This run</small><strong>${escapeHtml(formatRewardNumber(row.value))}</strong></span>
+      <span class="reward-compare-delta ${dir}">${escapeHtml(rewardDeltaLabel(row.value, row.baseline))}</span>
+    </div>
+  `;
+}
+
+function patchRewardComparison(run) {
+  const panel = document.querySelector("#reward-comparison-panel");
+  if (!panel) return;
+  const openGroups = [...panel.querySelectorAll(".reward-compare-group[open]")]
+    .map((group) => group.dataset.group || "");
+  const hadGroups = Boolean(panel.querySelector(".reward-compare-group"));
+  panel.outerHTML = rewardComparisonSection(run);
+  if (!hadGroups) return;
+  document.querySelectorAll("#reward-comparison-panel .reward-compare-group").forEach((group) => {
+    group.open = openGroups.includes(group.dataset.group || "");
+  });
+}
+
 function relatedJobsForRun(run) {
   return state.snapshot.jobs.filter((job) => {
     const payload = job.payload || {};
@@ -1191,6 +1341,7 @@ function runDetails(run, { context = "desktop" } = {}) {
     <div id="run-details-grid" class="details-grid">
       ${runDetailsGrid(run)}
     </div>
+    ${rewardComparisonSection(run)}
     <section class="subpanel">
       <h3>Run Metadata</h3>
       <label>Name <input id="run-name" data-run-id="${escapeHtml(run.id)}" value="${escapeHtml(draft.display_name ?? run.display_name ?? "")}" ${editable ? "" : "disabled"}></label>
@@ -1457,6 +1608,8 @@ function patchSelectedRunDetails() {
 
   const grid = document.querySelector("#run-details-grid");
   if (grid) grid.innerHTML = runDetailsGrid(run);
+
+  patchRewardComparison(run);
 
   const metadataRunId = document.querySelector("#run-name")?.dataset.runId || "";
   if (metadataRunId !== run.id || (!isRunMetadataFocused() && !state.runDrafts[run.id])) {

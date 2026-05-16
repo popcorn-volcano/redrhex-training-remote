@@ -882,6 +882,121 @@ video {
   padding-bottom: 7px;
 }
 
+.reward-comparison-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.reward-compare-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reward-compare-summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reward-compare-summary strong {
+  color: var(--text);
+}
+
+.reward-compare-group {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.reward-compare-group summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.reward-compare-group summary::marker {
+  color: var(--accent);
+}
+
+.reward-compare-group summary em {
+  min-width: 26px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 2px 8px;
+  text-align: center;
+  font-style: normal;
+  font-size: 12px;
+}
+
+.reward-compare-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.reward-compare-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.45fr) repeat(2, minmax(78px, 0.65fr)) minmax(86px, 0.55fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.reward-compare-row:first-child {
+  border-top: 0;
+}
+
+.reward-compare-row > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reward-compare-row small {
+  font-size: 11px;
+}
+
+.reward-compare-name strong,
+.reward-compare-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reward-compare-delta {
+  justify-self: end;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.reward-compare-delta.up {
+  background: rgba(38, 115, 77, 0.12);
+  color: var(--good);
+}
+
+.reward-compare-delta.down {
+  background: rgba(179, 58, 54, 0.1);
+  color: var(--bad);
+}
+
 .rewards-layout {
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
 }
@@ -1114,6 +1229,15 @@ video {
   .reward-editor {
     grid-template-columns: 1fr;
   }
+
+  .reward-compare-row {
+    grid-template-columns: minmax(150px, 1.3fr) repeat(2, minmax(70px, 0.7fr));
+  }
+
+  .reward-compare-delta {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1277,6 +1401,52 @@ video {
 
   .button-row > button {
     flex: 1;
+  }
+
+  .reward-compare-summary {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .reward-compare-summary span {
+    justify-content: space-between;
+    border-radius: 10px;
+    font-size: 13px;
+  }
+
+  .reward-compare-group summary {
+    min-height: 48px;
+    padding: 12px;
+    font-size: 17px;
+  }
+
+  .reward-compare-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 13px 12px;
+  }
+
+  .reward-compare-row > span:not(.reward-compare-name) {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    border-radius: 8px;
+    background: var(--panel-soft);
+    padding: 8px 10px;
+  }
+
+  .reward-compare-name strong {
+    font-size: 17px;
+  }
+
+  .reward-compare-name small {
+    font-size: 12px;
+  }
+
+  .reward-compare-delta {
+    justify-self: stretch;
+    text-align: center;
+    padding: 7px 10px;
   }
 
   .rewards-page {

@@ -145,7 +145,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--muted);
-  background: #fff;
+  background: var(--field);
   font-size: 12px;
   font-weight: 800;
 }
@@ -723,12 +723,12 @@ video {
 .folder-card:hover,
 .preset-button.active {
   border-color: var(--accent);
-  background: var(--accent-soft);
+  background: #eef8f8;
 }
 
 .preset-button.draft-preset {
   border-style: dashed;
-  background: #fff8e8;
+  background: var(--warning-bg);
 }
 
 .run-card-top,

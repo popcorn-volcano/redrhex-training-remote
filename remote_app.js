@@ -46,6 +46,8 @@ import {
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
   : { matches: false, addEventListener: null, addListener: null };
+
+const TEXT_AUTOSAVE_DELAY_MS = 350;
 const THEME_KEY = "redrhex_to_go_theme";
 const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 
@@ -60,8 +62,6 @@ function preferredTheme() {
   if (stored === "light" || stored === "dark") return stored;
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
-
-const TEXT_AUTOSAVE_DELAY_MS = 350;
 
 const state = {
   user: null,

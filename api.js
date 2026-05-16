@@ -42,7 +42,7 @@ async function parseResponse(response) {
     }
   }
   if (!response.ok) {
-    throw new Error(data?.message || data?.error_description || data?.hint || response.statusText);
+    throw new Error(data?.message || data?.error || data?.error_description || data?.hint || response.statusText);
   }
   return data;
 }

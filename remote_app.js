@@ -388,7 +388,7 @@ function rewardsView() {
           <button class="preset-button ${item.id === preset.id ? "active" : ""}" data-action="select-preset" data-id="${escapeHtml(item.id)}">
             <strong>${escapeHtml(item.name)}</strong>
             <small>${item.built_in ? "Built-in" : "Team preset"} · ${escapeHtml(formatRelativeTime(item.updated_at))}</small>
-          </button>`).join("") || empty("Apply the V2.0 schema to create presets.")}
+          </button>`).join("") || empty("Apply the V2.1 schema to create presets.")}
         </div>
       </aside>
       <article class="panel reward-workspace">

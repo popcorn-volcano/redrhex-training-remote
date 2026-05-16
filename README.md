@@ -1,6 +1,6 @@
-# RedRHex Child Remote Panel
+# RedRHex To Go
 
-GitHub Pages child UI for the RedRHex Training Panel V2.0 remote system.
+GitHub Pages child UI for the RedRHex Training Panel V2.1 remote system.
 
 Open:
 

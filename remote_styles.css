@@ -83,6 +83,38 @@ textarea {
   resize: vertical;
 }
 
+.autosave-row {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 24px;
+}
+
+.autosave-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.autosave-status[data-state="saving"],
+.autosave-status[data-state="dirty"] {
+  border-color: rgba(42, 99, 183, 0.24);
+  color: var(--info);
+  background: rgba(42, 99, 183, 0.07);
+}
+
+.autosave-status[data-state="error"] {
+  border-color: rgba(179, 58, 54, 0.24);
+  color: var(--bad);
+  background: rgba(179, 58, 54, 0.07);
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -541,6 +573,11 @@ video {
 .preset-button.active {
   border-color: var(--accent);
   background: #eef8f8;
+}
+
+.preset-button.draft-preset {
+  border-style: dashed;
+  background: #fff8e8;
 }
 
 .run-card-top,

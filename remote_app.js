@@ -28,6 +28,7 @@ import {
   friendlyErrorMessage,
   formatRelativeTime,
   hasActiveRemoteWork,
+  jobRunId,
   latestFinishedTweakRun,
   jobQueueLabel,
   machineState,
@@ -42,7 +43,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.0.0-discord-webhook-diagnostics";
+} from "./core.js?v=3.0.0-run-visibility";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -117,8 +118,12 @@ const state = {
   terrainPresetMetadataSaveInFlight: false,
   terrainPresetMetadataQueued: false,
   notificationSettings: null,
+  notificationSettingsDraft: null,
   notificationSaveStatus: "saved",
   notificationTestResult: null,
+  notificationMissedResult: null,
+  missedNotificationMode: "future_only",
+  lastQueuedJobId: "",
   message: "",
   loading: false,
   loadError: "",
@@ -193,14 +198,55 @@ function selectedTerrainPresetForTraining() {
   return preset;
 }
 
+function jobDisplayStatus(job = {}) {
+  const status = String(job.status || "").toLowerCase();
+  if (status === "completed" && job.type === "start_training") return "launched";
+  return status || "queued";
+}
+
+function syntheticRunsFromJobs() {
+  const realIds = new Set((state.snapshot.runs || []).map((run) => String(run.id || "")));
+  return (state.snapshot.jobs || [])
+    .filter((job) => job.type === "start_training")
+    .filter((job) => {
+      const linkedRunId = jobRunId(job);
+      return !linkedRunId || !realIds.has(linkedRunId);
+    })
+    .filter((job) => ["queued", "claimed", "running", "completed", "failed"].includes(String(job.status || "").toLowerCase()))
+    .map((job) => {
+      const payload = job.payload && typeof job.payload === "object" ? job.payload : {};
+      const linkedRunId = jobRunId(job);
+      const status = jobDisplayStatus(job);
+      return {
+        id: `job:${job.id}`,
+        synthetic_job: true,
+        job_id: job.id,
+        linked_run_id: linkedRunId,
+        source: "remote_job",
+        status,
+        display_name: status === "launched" ? "Training launched" : "Queued training",
+        created_at: job.created_at,
+        updated_at: job.updated_at || job.created_at,
+        folder: "",
+        params: payload,
+        created_by: job.actor_id || payload.requester_id || null,
+      };
+    });
+}
+
+function historyRunsForView() {
+  return [...syntheticRunsFromJobs(), ...(state.snapshot.runs || [])]
+    .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")));
+}
+
 function selectedRun({ fallback = true } = {}) {
-  const selected = state.snapshot.runs.find((run) => run.id === state.selectedRunId);
+  const selected = historyRunsForView().find((run) => run.id === state.selectedRunId);
   if (selected) return selected;
-  return fallback ? state.snapshot.runs[0] || null : null;
+  return fallback ? historyRunsForView()[0] || null : null;
 }
 
 function runById(runId) {
-  return state.snapshot.runs.find((run) => run.id === runId) || null;
+  return historyRunsForView().find((run) => run.id === runId) || null;
 }
 
 function selectedHistoryRun() {
@@ -347,9 +393,14 @@ async function refresh(options = {}) {
     state.snapshot = await loadRemoteSnapshot(state.machineId, state.user?.id || "");
     state.snapshot.presets = state.snapshot.presets.map(normalizePreset);
     state.snapshot.terrainPresets = (state.snapshot.terrainPresets || []).map(normalizeTerrainPreset);
-    state.notificationSettings = normalizeNotificationSettings(state.snapshot.notificationSettings);
-    if (!state.selectedRunId && state.snapshot.runs[0] && !(state.view === "history" && state.isPhone)) {
-      state.selectedRunId = state.snapshot.runs[0].id;
+    const freshNotificationSettings = normalizeNotificationSettings(state.snapshot.notificationSettings);
+    state.notificationSettings = freshNotificationSettings;
+    if (!state.notificationSettingsDraft || !["dirty", "saving"].includes(state.notificationSaveStatus)) {
+      state.notificationSettingsDraft = freshNotificationSettings;
+    }
+    const viewRuns = historyRunsForView();
+    if (!state.selectedRunId && viewRuns[0] && !(state.view === "history" && state.isPhone)) {
+      state.selectedRunId = viewRuns[0].id;
     }
     if (!rewardPresetsForView().find((preset) => preset.id === state.selectedPresetId) && state.snapshot.presets[0]) {
       state.selectedPresetId = state.snapshot.presets[0].id;
@@ -433,7 +484,7 @@ function shell() {
     <nav class="nav-tabs">
       ${views.map(([id, label]) => `<button class="${state.view === id ? "active" : ""}" data-action="view" data-view="${id}">${label}</button>`).join("")}
     </nav>
-    <div id="message-notice" class="notice" ${state.message ? "" : "hidden"}>${escapeHtml(state.message)}</div>
+    <div id="message-notice" class="notice ${state.lastQueuedJobId && /^Queued/.test(state.message) ? "queue-success" : ""}" ${state.message ? "" : "hidden"}>${escapeHtml(state.message)}</div>
     <div id="schema-warnings">${(state.snapshot.schema?.warnings || []).map((warning) => `<div class="notice warning">${escapeHtml(warning)}</div>`).join("")}</div>
     <div id="load-error-notice" class="notice danger" ${state.loadError ? "" : "hidden"}>${escapeHtml(state.loadError)}</div>
     ${state.user ? welcomeBanner() : ""}
@@ -481,8 +532,8 @@ function welcomeBanner() {
         <p class="subcopy">${escapeHtml(readyText)}</p>
       </div>
       <div class="welcome-actions">
-        <button class="primary" data-action="view" data-view="train">Start Training</button>
-        <button data-action="view" data-view="history">View History</button>
+        ${state.view === "train" ? "" : `<button class="primary" data-action="view" data-view="train">Go To Training Page</button>`}
+        ${state.view === "history" ? "" : `<button data-action="view" data-view="history">View History</button>`}
       </div>
     </section>
   `;
@@ -566,7 +617,7 @@ function dashboardStatusCards() {
   const queued = jobs.filter((job) => String(job.status || "").toLowerCase() === "queued").length;
   const running = jobs.filter((job) => ["claimed", "running"].includes(String(job.status || "").toLowerCase())).length;
   const failed = jobs.filter((job) => String(job.status || "").toLowerCase() === "failed").slice(0, 5).length;
-  const latestRun = state.snapshot.runs[0];
+  const latestRun = historyRunsForView()[0];
   const stateCopy = {
     ready: ["Ready", "Mother is online and accepting jobs."],
     busy: ["Busy", "An Isaac/GPU action is running."],
@@ -607,14 +658,14 @@ function dashboardQueueSummary() {
   return `<div class="mini-list">${visibleJobs.map((job) => `
     <div>
       <strong>${escapeHtml(job.type)}</strong>
-      <span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span>
+      <span class="badge ${statusTone(jobDisplayStatus(job))}">${escapeHtml(jobDisplayStatus(job))}</span>
       <small>${escapeHtml(jobQueueLabel(job, machine))}</small>
       <small>${escapeHtml(formatRelativeTime(job.created_at))}</small>
     </div>`).join("")}</div>`;
 }
 
 function dashboardLatestRuns() {
-  const latestRuns = state.snapshot.runs.slice(0, state.isPhone ? 3 : 5);
+  const latestRuns = historyRunsForView().slice(0, state.isPhone ? 3 : 5);
   return latestRuns.map(runCard).join("") || empty("No runs synced yet.");
 }
 
@@ -637,7 +688,7 @@ function jobSummary(jobs) {
   return `<div class="mini-list">${jobs.map((job) => `
     <div>
       <strong>${escapeHtml(job.type)}</strong>
-      <span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span>
+      <span class="badge ${statusTone(jobDisplayStatus(job))}">${escapeHtml(jobDisplayStatus(job))}</span>
       <small>${escapeHtml(jobQueueLabel(job, machine))}</small>
       <small>${escapeHtml(formatRelativeTime(job.created_at))}</small>
     </div>`).join("")}</div>`;
@@ -900,7 +951,7 @@ function terrainInput(field, value, editable) {
 
 function filteredRuns() {
   const q = state.runSearch.trim().toLowerCase();
-  return state.snapshot.runs.filter((run) => {
+  return historyRunsForView().filter((run) => {
     const folder = run.folder || "";
     if (state.folderFilter === "uncategorized" && folder) return false;
     if (state.folderFilter !== "all" && state.folderFilter !== "uncategorized" && folder !== state.folderFilter) return false;
@@ -916,7 +967,7 @@ function runMatchesSearch(run) {
 }
 
 function folders() {
-  const set = new Set(state.snapshot.runs.map((run) => run.folder).filter(Boolean));
+  const set = new Set(historyRunsForView().map((run) => run.folder).filter(Boolean));
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 
@@ -925,7 +976,7 @@ function folderLabel(folderKey) {
 }
 
 function folderRuns(folderKey) {
-  return state.snapshot.runs.filter((run) => {
+  return historyRunsForView().filter((run) => {
     if (folderKey === "uncategorized") return !run.folder;
     return run.folder === folderKey;
   });
@@ -1028,7 +1079,7 @@ function historyDesktopBackBar(currentLabel) {
 
 function historyFolderNav({ root, currentLabel, folderCount }) {
   if (root) {
-    const runCount = state.snapshot.runs.length;
+    const runCount = historyRunsForView().length;
     return `
       <div class="history-folder-nav root">
         <div>
@@ -1292,7 +1343,14 @@ function relatedJobsForRun(run) {
   return state.snapshot.jobs.filter((job) => {
     const payload = job.payload || {};
     const result = job.result || {};
-    return payload.run_id === run.id || result.local_run_id === run.id || result.process_id === run.id;
+    const resultPayload = result.payload || {};
+    return job.id === run.job_id
+      || payload.run_id === run.id
+      || result.local_run_id === run.id
+      || result.process_id === run.id
+      || resultPayload.id === run.id
+      || (run.linked_run_id && resultPayload.id === run.linked_run_id)
+      || (run.linked_run_id && result.local_run_id === run.linked_run_id);
   }).slice(0, 8);
 }
 
@@ -1302,7 +1360,7 @@ function relatedJobsSection(run) {
     <section id="related-jobs-panel" class="subpanel">
       <h3>Related Jobs</h3>
       ${relatedJobs.length ? `<div class="mini-list">${relatedJobs.map((job) => `
-        <div><strong>${escapeHtml(job.type)}</strong><span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span><small>${escapeHtml(jobQueueLabel(job, state.snapshot.targetMachine || state.snapshot.machine))}</small>${jobExtraLine(job)}<small>${escapeHtml(formatRelativeTime(job.created_at))}</small></div>
+        <div><strong>${escapeHtml(job.type)}</strong><span class="badge ${statusTone(jobDisplayStatus(job))}">${escapeHtml(jobDisplayStatus(job))}</span><small>${escapeHtml(jobQueueLabel(job, state.snapshot.targetMachine || state.snapshot.machine))}</small>${jobExtraLine(job)}<small>${escapeHtml(formatRelativeTime(job.created_at))}</small></div>
       `).join("")}</div>` : empty("No remote jobs linked to this run yet.")}
     </section>
   `;
@@ -1367,6 +1425,28 @@ function teamVideoSection(run) {
 }
 
 function runDetails(run, { context = "desktop" } = {}) {
+  if (run.synthetic_job) {
+    const params = run.params || {};
+    return `
+      <div class="section-head run-detail-head ${context === "inline" ? "inline" : ""}">
+        <div>
+          <h2 id="selected-run-title">${escapeHtml(run.display_name || run.id)}</h2>
+          <p id="selected-run-id" class="muted">Job ${escapeHtml(run.job_id || run.id)}</p>
+        </div>
+        <span id="selected-run-status" class="badge ${statusTone(run.status)}">${escapeHtml(run.status || "queued")}</span>
+      </div>
+      <section class="subpanel">
+        <h3>Launch Queue</h3>
+        <div class="details-grid">
+          <article class="run-info-card"><span>Task</span><strong>${escapeHtml(params.task || "-")}</strong><small>${escapeHtml(params.device || "cuda:0")}</small></article>
+          <article class="run-info-card"><span>Scale</span><strong>${escapeHtml(params.num_envs || "-")} envs</strong><small>${escapeHtml(params.max_iterations || "-")} iterations</small></article>
+          <article class="run-info-card"><span>Reward</span><strong>${escapeHtml(params.reward_preset_id || "baseline")}</strong><small>${Object.keys(params.reward_overrides || {}).length} overrides</small></article>
+          <article class="run-info-card"><span>Terrain</span><strong>${escapeHtml(params.terrain_preset_id || "baseline")}</strong><small>${Object.keys(params.terrain_overrides || {}).length} overrides</small></article>
+        </div>
+      </section>
+      ${relatedJobsSection(run)}
+    `;
+  }
   const draft = currentRunDraft(run);
   const editable = canEditRun(role());
   const tweakable = canOperate(role()) && canBuildTweakFromRun(run, state.snapshot.presets);
@@ -1403,7 +1483,7 @@ function runDetails(run, { context = "desktop" } = {}) {
 }
 
 function notificationSettingsForView() {
-  return normalizeNotificationSettings(state.notificationSettings);
+  return normalizeNotificationSettings(state.notificationSettingsDraft || state.notificationSettings);
 }
 
 function notificationChannelResult(result) {
@@ -1422,6 +1502,10 @@ function notificationChannelResult(result) {
 function notificationSettingsCard() {
   const settings = notificationSettingsForView();
   const testText = state.notificationTestResult ? notificationChannelResult(state.notificationTestResult.results || {}) : "";
+  const missedText = state.notificationMissedResult
+    ? state.notificationMissedResult.message
+      || `checked ${state.notificationMissedResult.checked || 0}, sent ${state.notificationMissedResult.sent || 0}, skipped ${state.notificationMissedResult.skipped_sent || 0}`
+    : "";
   return `
     <article class="panel span-2 notification-card">
       <div class="section-head">
@@ -1452,11 +1536,25 @@ function notificationSettingsCard() {
           </div>
         </section>
       </div>
+      <section class="notification-missed">
+        <h3>Missed notifications</h3>
+        <div class="input-row">
+          <label>Catch-up
+            <select id="missed-notification-mode">
+              <option value="future_only" ${state.missedNotificationMode === "future_only" ? "selected" : ""}>Future only</option>
+              <option value="latest" ${state.missedNotificationMode === "latest" ? "selected" : ""}>Latest missed run</option>
+              <option value="all" ${state.missedNotificationMode === "all" ? "selected" : ""}>All missed runs</option>
+            </select>
+          </label>
+        </div>
+      </section>
       <div class="button-row wrap">
         <button class="primary" data-action="save-notification-settings">Save Notifications</button>
         <button data-action="send-test-notification">Send Test</button>
+        <button data-action="send-missed-notifications">Send Missed</button>
       </div>
       ${testText ? `<p class="muted">${escapeHtml(testText)}</p>` : ""}
+      ${missedText ? `<p class="muted">${escapeHtml(missedText)}</p>` : ""}
     </article>
   `;
 }
@@ -1534,6 +1632,7 @@ function patchShellStatus() {
   if (message) {
     message.textContent = state.message;
     message.hidden = !state.message;
+    message.classList.toggle("queue-success", Boolean(state.lastQueuedJobId && /^Queued/.test(state.message)));
   }
   const warningSlot = document.querySelector("#schema-warnings");
   if (warningSlot) {
@@ -1572,7 +1671,7 @@ function patchRunList() {
 
 function patchRunCardsInPlace() {
   document.querySelectorAll(".run-card").forEach((card) => {
-    const run = state.snapshot.runs.find((item) => item.id === card.dataset.id);
+    const run = runById(card.dataset.id);
     if (!run) return;
     const video = videoStateForRun(run, state.snapshot.artifacts);
     const active = run.id === state.selectedRunId;
@@ -1616,7 +1715,7 @@ function syncHistoryAccordion(card) {
   existingDetails.forEach((details) => details.remove());
   state.selectedRunId = runId;
   patchRunCardsInPlace();
-  const run = state.snapshot.runs.find((item) => item.id === runId);
+  const run = runById(runId);
   if (run) {
     wrapper.insertAdjacentHTML("beforeend", `<article class="inline-run-details">${runDetails(run, { context: "inline" })}</article>`);
   }
@@ -1829,6 +1928,27 @@ async function handleLogin() {
   setMessage("Signed in.");
 }
 
+function requesterLabel() {
+  return state.profile?.display_name || state.profile?.email || state.user?.email || "Remote member";
+}
+
+function rememberQueuedJob(job, rows = []) {
+  const inserted = Array.isArray(rows) && rows[0]
+    ? rows[0]
+    : {
+      ...job,
+      id: `local-${Date.now()}`,
+      status: "queued",
+      created_at: new Date().toISOString(),
+      result: {},
+      error: "",
+    };
+  state.lastQueuedJobId = inserted.id || "";
+  const existing = state.snapshot.jobs || [];
+  state.snapshot.jobs = [inserted, ...existing.filter((item) => item.id !== inserted.id)].slice(0, 60);
+  return inserted;
+}
+
 async function queueTraining() {
   state.machineId = document.querySelector("#machine-id")?.value || state.machineId;
   localStorage.setItem("redrhex_machine_id", state.machineId);
@@ -1862,10 +1982,19 @@ async function queueTraining() {
     params.tweak_source_run_id = preset.source_run_id || "";
     params.tweak_source_label = preset.source_label || preset.source_run_id || "";
   }
-  const job = buildTrainingJob({ machineId: state.machineId, params, preset, terrainPreset, role: role(), userId: state.user?.id });
-  await insert("jobs", job);
+  const job = buildTrainingJob({
+    machineId: state.machineId,
+    params,
+    preset,
+    terrainPreset,
+    role: role(),
+    userId: state.user?.id,
+    requesterLabel: requesterLabel(),
+  });
+  const rows = await insert("jobs", job);
+  rememberQueuedJob(job, rows);
   await refresh({ silent: true });
-  setMessage(`Queued training with ${preset.name} and ${terrainPreset.name}.`);
+  setMessage(`Queued training with ${preset.name} and ${terrainPreset.name}. It is now visible in History.`);
 }
 
 function applyTweakPayload(payload) {
@@ -2286,7 +2415,8 @@ async function queueRunAction(type, message, payload = {}) {
   const run = selectedRun();
   if (!run) return;
   const job = buildActionJob({ machineId: state.machineId, type, runId: run.id, role: role(), userId: state.user?.id, payload });
-  await insert("jobs", job);
+  const rows = await insert("jobs", job);
+  rememberQueuedJob(job, rows);
   await refresh({ silent: true });
   setMessage(message);
 }
@@ -2357,11 +2487,13 @@ function discordWebhookValidationMessage(webhook) {
 
 async function saveNotificationSettings({ silent = false } = {}) {
   const payload = collectNotificationSettings();
+  state.notificationSettingsDraft = normalizeNotificationSettings(payload);
   state.notificationSaveStatus = "saving";
   patchConnection();
   try {
     const rows = await upsert("notification_settings", payload, "user_id,machine_id");
     state.notificationSettings = normalizeNotificationSettings(rows?.[0] || payload);
+    state.notificationSettingsDraft = state.notificationSettings;
     state.notificationSaveStatus = "saved";
     if (!silent) setMessage("Notification settings saved.");
     await refresh({ silent: true });
@@ -2401,6 +2533,45 @@ async function sendTestNotification() {
   } catch (error) {
     const message = friendlyErrorMessage(error);
     state.notificationTestResult = { ok: false, results: { discord: { ok: false, error: message } } };
+    patchConnection();
+    setMessage(message);
+  }
+}
+
+async function sendMissedNotifications() {
+  const selectedMode = document.querySelector("#missed-notification-mode")?.value || state.missedNotificationMode;
+  state.missedNotificationMode = selectedMode;
+  if (selectedMode === "future_only") {
+    state.notificationMissedResult = { message: "Future only selected. Choose Latest missed run or All missed runs to catch up." };
+    patchConnection();
+    return setMessage("Choose a missed-notification catch-up mode first.");
+  }
+  state.notificationMissedResult = { message: "Missed notification job queued." };
+  patchConnection();
+  try {
+    if (state.notificationSaveStatus === "dirty") {
+      await saveNotificationSettings({ silent: true });
+    }
+    const job = {
+      machine_id: state.machineId || null,
+      type: "send_missed_notifications",
+      actor_id: state.user?.id || null,
+      actor_role: role() || "viewer",
+      payload: {
+        scope: selectedMode,
+        requester_id: state.user?.id || null,
+        requester_label: requesterLabel(),
+      },
+    };
+    const rows = await insert("jobs", job);
+    rememberQueuedJob(job, rows);
+    state.notificationMissedResult = { message: selectedMode === "latest" ? "Queued latest missed notification catch-up." : "Queued all missed notification catch-up." };
+    await refresh({ silent: true });
+    patchConnection();
+    setMessage(state.notificationMissedResult.message);
+  } catch (error) {
+    const message = friendlyErrorMessage(error);
+    state.notificationMissedResult = { message };
     patchConnection();
     setMessage(message);
   }
@@ -2540,6 +2711,7 @@ document.addEventListener("click", async (event) => {
     if (action === "job-compact-run") return await compactSelectedRun();
     if (action === "save-notification-settings") return await saveNotificationSettings();
     if (action === "send-test-notification") return await sendTestNotification();
+    if (action === "send-missed-notifications") return await sendMissedNotifications();
   } catch (error) {
     setMessage(friendlyErrorMessage(error));
   }
@@ -2590,8 +2762,13 @@ document.addEventListener("change", (event) => {
   if (event.target.classList.contains("terrain-input") && state.draftTerrainPreset) {
     state.draftTerrainPreset.values[event.target.dataset.key] = parseTerrainValue(event.target);
   }
+  if (event.target.id === "missed-notification-mode") {
+    state.missedNotificationMode = event.target.value;
+    state.notificationMissedResult = null;
+    patchConnection();
+  }
   if (event.target.id?.startsWith("notify-") || event.target.classList.contains("notify-event-toggle")) {
-    state.notificationSettings = normalizeNotificationSettings(collectNotificationSettings());
+    state.notificationSettingsDraft = normalizeNotificationSettings(collectNotificationSettings());
     state.notificationSaveStatus = "dirty";
     patchConnection();
   }
@@ -2643,7 +2820,7 @@ document.addEventListener("input", (event) => {
     state.draftTerrainPreset.values[event.target.dataset.key] = parseTerrainValue(event.target);
   }
   if (event.target.id === "notify-discord-webhook") {
-    state.notificationSettings = normalizeNotificationSettings(collectNotificationSettings());
+    state.notificationSettingsDraft = normalizeNotificationSettings(collectNotificationSettings());
     state.notificationSaveStatus = "dirty";
   }
 });

@@ -352,7 +352,7 @@ export function machineState(machine, now = Date.now()) {
 export function statusTone(status) {
   const normalized = String(status || "").toLowerCase();
   if (["completed", "ready", "online", "accepting", "success"].includes(normalized)) return "good";
-  if (["running", "claimed", "queued", "busy"].includes(normalized)) return "info";
+  if (["running", "claimed", "queued", "busy", "launched"].includes(normalized)) return "info";
   if (["failed", "cancelled", "offline", "missing"].includes(normalized)) return "bad";
   return "muted";
 }
@@ -380,8 +380,24 @@ export function jobQueueLabel(job = {}, machine = null) {
   if (status === "claimed") return "claimed by worker";
   if (status === "running") return "running";
   if (status === "failed") return job.error || "failed";
+  if (status === "completed" && type === "start_training") return "launched";
   if (status === "completed") return "completed";
   return status || "unknown";
+}
+
+export function jobRunId(job = {}) {
+  const payload = job.payload && typeof job.payload === "object" ? job.payload : {};
+  const result = job.result && typeof job.result === "object" ? job.result : {};
+  const resultPayload = result.payload && typeof result.payload === "object" ? result.payload : {};
+  return String(
+    payload.run_id
+    || result.local_run_id
+    || result.process_id
+    || resultPayload.id
+    || resultPayload.run_id
+    || resultPayload.source_run_id
+    || "",
+  );
 }
 
 export function latestVideoArtifact(runId, artifacts = []) {
@@ -529,7 +545,7 @@ export function formatRelativeTime(iso, now = Date.now()) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function buildTrainingJob({ machineId, params, preset, terrainPreset, role, userId }) {
+export function buildTrainingJob({ machineId, params, preset, terrainPreset, role, userId, requesterLabel = "" }) {
   const rewardValues = preset?.values && typeof preset.values === "object" ? preset.values : {};
   const terrainValues = terrainPreset?.values && typeof terrainPreset.values === "object" ? terrainPreset.values : {};
   return {
@@ -544,6 +560,8 @@ export function buildTrainingJob({ machineId, params, preset, terrainPreset, rol
       reward_overrides: rewardValues,
       terrain_preset_id: terrainPreset?.id || "baseline",
       terrain_overrides: terrainValues,
+      requester_id: userId || null,
+      requester_label: requesterLabel || "",
     },
   };
 }

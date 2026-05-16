@@ -11,6 +11,7 @@ import {
   hasActiveRemoteWork,
   isMachineFresh,
   jobQueueLabel,
+  jobRunId,
   latestVideoArtifact,
   machineState,
   refreshDelayForSnapshot,
@@ -38,12 +39,15 @@ test("training job includes reward snapshot", () => {
     machineId: "lab-pc",
     role: "operator",
     userId: "user-one",
+    requesterLabel: "phone user",
     params: { task: "T", num_envs: 4, max_iterations: 8, device: "cuda:0" },
     preset: { id: "speed", values: { rew_scale_forward_vel: 5 } },
   });
   assert.equal(job.type, "start_training");
   assert.equal(job.payload.reward_preset_id, "speed");
   assert.deepEqual(job.payload.reward_overrides, { rew_scale_forward_vel: 5 });
+  assert.equal(job.payload.requester_id, "user-one");
+  assert.equal(job.payload.requester_label, "phone user");
 });
 
 test("latest video artifact prefers newest storage record", () => {
@@ -65,7 +69,14 @@ test("job labels explain why a job is waiting", () => {
   const fresh = { heartbeat_at: new Date().toISOString(), accept_jobs: true, gpu_locked: true };
   assert.equal(jobQueueLabel({ status: "queued", type: "start_training" }, fresh), "waiting for GPU");
   assert.equal(jobQueueLabel({ status: "queued", type: "stop_process" }, fresh), "waiting for worker");
+  assert.equal(jobQueueLabel({ status: "completed", type: "start_training" }, fresh), "launched");
   assert.equal(jobQueueLabel({ status: "failed", error: "boom" }, fresh), "boom");
+});
+
+test("job run id helper reads launched job result payloads", () => {
+  assert.equal(jobRunId({ result: { payload: { id: "panel_run" } } }), "panel_run");
+  assert.equal(jobRunId({ result: { local_run_id: "panel_run" } }), "panel_run");
+  assert.equal(jobRunId({ payload: { run_id: "existing_run" } }), "existing_run");
 });
 
 test("run metadata patch trims fields and includes updated_at", () => {

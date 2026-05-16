@@ -371,6 +371,22 @@ video {
   color: var(--warn);
 }
 
+.notice.queue-success {
+  animation: queue-confirm 0.55s ease-out;
+}
+
+@keyframes queue-confirm {
+  0% {
+    transform: scale(0.98);
+  }
+  45% {
+    transform: scale(1.01);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 .primary {
   border-color: var(--accent);
   background: var(--accent);
@@ -469,6 +485,12 @@ video {
 .notification-events {
   display: grid;
   gap: 8px;
+}
+
+.notification-missed {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 .dashboard-stack {

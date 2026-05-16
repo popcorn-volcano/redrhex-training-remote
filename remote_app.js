@@ -617,6 +617,7 @@ function historyLayout() {
   const folderCount = folderSummaries().length;
   return `
     <section class="history-layout ${phoneClass}">
+      ${root ? "" : historyDesktopBackBar(currentLabel)}
       <aside class="panel run-list-panel">
         <div class="section-head compact">
           <div>
@@ -631,6 +632,23 @@ function historyLayout() {
       </aside>
       ${state.isPhone ? "" : `<article class="panel run-details">${selected ? runDetails(selected, { context: "desktop" }) : empty(root ? "Open a folder to see runs." : "Select a run.")}</article>`}
     </section>
+  `;
+}
+
+function historyDesktopBackBar(currentLabel) {
+  const runCount = filteredRuns().length;
+  return `
+    <div class="desktop-folder-backbar">
+      <button class="desktop-folder-back" data-action="open-folder-root">
+        <span aria-hidden="true">←</span>
+        Folder Library
+      </button>
+      <div>
+        <small>Viewing folder</small>
+        <strong>${escapeHtml(currentLabel)}</strong>
+        <span>${runCount} run${runCount === 1 ? "" : "s"}</span>
+      </div>
+    </div>
   `;
 }
 

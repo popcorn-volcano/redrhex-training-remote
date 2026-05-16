@@ -555,6 +555,60 @@ video {
   gap: 14px;
 }
 
+.desktop-folder-backbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid rgba(31, 122, 140, 0.28);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ffffff, #edf8f6);
+  box-shadow: var(--shadow);
+  padding: 12px;
+}
+
+.desktop-folder-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  border-color: var(--accent);
+  background: #fff;
+  color: var(--accent-strong);
+}
+
+.desktop-folder-back span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 900;
+}
+
+.desktop-folder-backbar div:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: right;
+}
+
+.desktop-folder-backbar small,
+.desktop-folder-backbar span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.desktop-folder-backbar strong {
+  max-width: 42vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .run-list-panel {
   align-self: start;
   position: sticky;
@@ -868,6 +922,10 @@ video {
     min-height: 0;
   }
 
+  .desktop-folder-backbar {
+    display: none;
+  }
+
   .inline-run-details {
     padding: 13px;
   }
@@ -906,9 +964,10 @@ video {
 
   .folder-return-card {
     position: sticky;
-    top: 58px;
+    top: 74px;
     z-index: 4;
     min-height: 62px;
+    margin-top: 12px;
     border-radius: 11px;
     box-shadow: 0 10px 24px rgba(25, 42, 40, 0.1);
   }

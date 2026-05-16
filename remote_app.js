@@ -1,140 +1,694 @@
-const REDRHEX_SUPABASE_URL = "https://tqvopodmsprhujyagaan.supabase.co";
-const REDRHEX_SUPABASE_ANON_KEY = "sb_publishable_gTVhR0oihwopq3LZhSTszA_K4W6S5AU";
-const DEFAULT_MACHINE_ID = "biorolapc2-ubuntu";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js";
+import {
+  createSignedVideoUrl,
+  currentUser,
+  insert,
+  loadRemoteSnapshot,
+  select,
+  signIn,
+  signOut,
+  update,
+  upsert,
+} from "./api.js";
+import {
+  REWARD_FIELDS,
+  buildActionJob,
+  buildTrainingJob,
+  canEditPreset,
+  canEditRun,
+  canOperate,
+  escapeHtml,
+  formatRelativeTime,
+  latestVideoArtifact,
+  machineState,
+  normalizePreset,
+  slugify,
+  statusTone,
+} from "./core.js";
 
 const state = {
-  supabaseUrl: REDRHEX_SUPABASE_URL,
-  anonKey: REDRHEX_SUPABASE_ANON_KEY,
-  machineId: localStorage.getItem("redrhex_machine_id") || DEFAULT_MACHINE_ID,
-  accessToken: sessionStorage.getItem("redrhex_access_token") || "",
+  user: null,
   profile: null,
+  view: localStorage.getItem("redrhex_child_view") || "dashboard",
+  machineId: localStorage.getItem("redrhex_machine_id") || DEFAULT_MACHINE_ID,
+  snapshot: {
+    machines: [],
+    machine: null,
+    jobs: [],
+    runs: [],
+    artifacts: [],
+    presets: [],
+  },
+  selectedPresetId: localStorage.getItem("redrhex_child_preset") || "baseline",
+  draftPreset: null,
+  selectedRunId: "",
+  runSearch: "",
+  folderFilter: "all",
+  signedVideos: {},
+  message: "",
+  loading: false,
+  loadError: "",
 };
 
-const $ = (selector) => document.querySelector(selector);
+const app = document.querySelector("#app");
 
-function status(message) {
-  $("#status").textContent = message;
+function role() {
+  return state.profile?.role || "viewer";
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+function selectedPreset() {
+  const presets = state.snapshot.presets.map(normalizePreset);
+  return presets.find((preset) => preset.id === state.selectedPresetId) || presets[0] || normalizePreset({ id: "baseline", name: "Baseline" });
 }
 
-function hydrateForm() {
-  $("#machine-id").value = state.machineId;
-  $("#session-status").textContent = state.accessToken ? "Token saved" : "Signed out";
-  $("#project-status").textContent = `Connected to ${new URL(state.supabaseUrl).host}`;
+function selectedRun() {
+  return state.snapshot.runs.find((run) => run.id === state.selectedRunId) || state.snapshot.runs[0] || null;
 }
 
-function saveConfig() {
-  state.machineId = $("#machine-id").value;
-  localStorage.setItem("redrhex_machine_id", state.machineId);
-  status("Machine target saved in this browser.");
+function setMessage(message) {
+  state.message = message;
+  render();
 }
 
-async function supabaseFetch(path, options = {}) {
-  if (!state.supabaseUrl || !state.anonKey) throw new Error("Remote Supabase project is not configured.");
-  const response = await fetch(`${state.supabaseUrl}${path}`, {
-    headers: {
-      apikey: state.anonKey,
-      Authorization: `Bearer ${state.accessToken || state.anonKey}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!response.ok) throw new Error(data?.message || data?.error_description || response.statusText);
-  return data;
+function setView(view) {
+  state.view = view;
+  localStorage.setItem("redrhex_child_view", view);
+  render();
 }
 
-async function login() {
-  saveConfig();
-  const data = await supabaseFetch("/auth/v1/token?grant_type=password", {
-    method: "POST",
-    body: JSON.stringify({
-      email: $("#login-email").value,
-      password: $("#login-password").value,
-    }),
-  });
-  state.accessToken = data.access_token;
-  sessionStorage.setItem("redrhex_access_token", state.accessToken);
-  $("#session-status").textContent = "Signed in";
-  await loadProfile();
-  await refreshAll();
+async function refresh() {
+  if (!state.user) return;
+  state.loading = true;
+  state.loadError = "";
+  render();
+  try {
+    state.snapshot = await loadRemoteSnapshot(state.machineId);
+    state.snapshot.presets = state.snapshot.presets.map(normalizePreset);
+    if (!state.selectedRunId && state.snapshot.runs[0]) state.selectedRunId = state.snapshot.runs[0].id;
+    if (!state.snapshot.presets.find((preset) => preset.id === state.selectedPresetId) && state.snapshot.presets[0]) {
+      state.selectedPresetId = state.snapshot.presets[0].id;
+    }
+  } catch (error) {
+    state.loadError = error.message;
+  } finally {
+    state.loading = false;
+    render();
+  }
 }
 
 async function loadProfile() {
-  const user = await supabaseFetch("/auth/v1/user");
-  const profiles = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=*`);
-  state.profile = profiles[0] || { id: user.id, role: "viewer" };
-  $("#session-status").textContent = `${user.email || "Signed in"} · ${state.profile.role || "viewer"}`;
+  if (!state.user) return;
+  const rows = await select("profiles", `id=eq.${encodeURIComponent(state.user.id)}&select=*`);
+  state.profile = rows[0] || { id: state.user.id, email: state.user.email, role: "viewer" };
+}
+
+async function boot() {
+  state.user = await currentUser();
+  if (state.user) {
+    await loadProfile();
+    await refresh();
+  }
+  render();
+}
+
+function healthChecks() {
+  const machine = state.snapshot.targetMachine || state.snapshot.machine;
+  const machineStatus = machineState(machine);
+  return [
+    ["auth", "Signed in", Boolean(state.user), state.user?.email || "No active session"],
+    ["role", "Profile role", Boolean(state.profile?.role), role()],
+    ["db", "Supabase database", !state.loadError, state.loadError || "Queries responded"],
+    ["machine", "Machine heartbeat", machineStatus !== "missing" && machineStatus !== "offline", machine?.heartbeat_at ? `${machine.machine_id} - ${formatRelativeTime(machine.heartbeat_at)}` : "No heartbeat"],
+    ["accept", "Worker accepting jobs", Boolean(machine?.accept_jobs), machine?.accept_jobs ? "Ready to queue" : "Paused by mother panel"],
+    ["gpu", "GPU lock", !machine?.gpu_locked, machine?.gpu_locked ? "Busy" : "Free"],
+    ["video", "Video storage", Array.isArray(state.snapshot.artifacts), "Private signed playback enabled after schema update"],
+  ];
+}
+
+function shell() {
+  const views = [
+    ["dashboard", "Dashboard"],
+    ["train", "Train"],
+    ["rewards", "Rewards"],
+    ["history", "History"],
+    ["connection", "Connection"],
+  ];
+  const machine = state.snapshot.targetMachine || state.snapshot.machine;
+  const tone = statusTone(machineState(machine));
+  return `
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">BioRoLa ABAD RHex Team</p>
+        <h1>RedRHex Child Remote Panel V2.0</h1>
+        <p class="subcopy">A simplified mother panel for team training, reward tuning, history, and shared results.</p>
+      </div>
+      <div class="top-status">
+        <span class="badge ${tone}">${escapeHtml(machineState(machine))}</span>
+        <span class="badge">${escapeHtml(role())}</span>
+      </div>
+    </header>
+    <nav class="nav-tabs">
+      ${views.map(([id, label]) => `<button class="${state.view === id ? "active" : ""}" data-action="view" data-view="${id}">${label}</button>`).join("")}
+    </nav>
+    ${state.message ? `<div class="notice">${escapeHtml(state.message)}</div>` : ""}
+    ${state.loadError ? `<div class="notice danger">${escapeHtml(state.loadError)}</div>` : ""}
+    ${state.user ? page() : loginPage()}
+  `;
+}
+
+function loginPage() {
+  return `
+    <section class="login-grid">
+      <article class="panel intro-panel">
+        <h2>Team Sign In</h2>
+        <p>This child panel connects to the RedRHex Supabase control plane. It uses the public project URL and publishable key; the private machine token stays only on the training PC.</p>
+        <div class="health-row">
+          <span>Project</span>
+          <strong>${escapeHtml(new URL(SUPABASE_URL).host)}</strong>
+        </div>
+      </article>
+      <article class="panel">
+        <h2>Login</h2>
+        <label>Email <input id="login-email" type="email" autocomplete="email"></label>
+        <label>Password <input id="login-password" type="password" autocomplete="current-password"></label>
+        <button class="primary wide" data-action="login">Sign In</button>
+      </article>
+    </section>
+  `;
+}
+
+function page() {
+  if (state.view === "train") return trainView();
+  if (state.view === "rewards") return rewardsView();
+  if (state.view === "history") return historyView();
+  if (state.view === "connection") return connectionView();
+  return dashboardView();
+}
+
+function dashboardView() {
+  const machine = state.snapshot.targetMachine || state.snapshot.machine;
+  const latestRuns = state.snapshot.runs.slice(0, 5);
+  const jobs = state.snapshot.jobs.slice(0, 6);
+  return `
+    <section class="dashboard-grid">
+      <article class="panel span-2">
+        <div class="section-head">
+          <div>
+            <h2>Connection Health</h2>
+            <p class="muted">A quick read on whether the child can talk to mother through Supabase.</p>
+          </div>
+          <button data-action="refresh">${state.loading ? "Refreshing" : "Refresh"}</button>
+        </div>
+        <div class="health-grid">
+          ${healthChecks().map(([, label, ok, detail]) => `
+            <div class="health-card ${ok ? "ok" : "warn"}">
+              <span>${escapeHtml(label)}</span>
+              <strong>${ok ? "OK" : "Needs attention"}</strong>
+              <small>${escapeHtml(detail)}</small>
+            </div>`).join("")}
+        </div>
+      </article>
+      <article class="panel">
+        <h2>Machine</h2>
+        ${machineCard(machine)}
+      </article>
+      <article class="panel">
+        <h2>Queue</h2>
+        ${jobSummary(jobs)}
+      </article>
+      <article class="panel span-2">
+        <h2>Latest Runs</h2>
+        <div class="run-strip">${latestRuns.map(runCard).join("") || empty("No runs synced yet.")}</div>
+      </article>
+    </section>
+  `;
+}
+
+function machineCard(machine) {
+  if (!machine) return empty("No machine heartbeat yet. Start the worker from mother Control Center.");
+  return `
+    <div class="machine-card">
+      <strong>${escapeHtml(machine.machine_id)}</strong>
+      <span class="badge ${statusTone(machineState(machine))}">${escapeHtml(machineState(machine))}</span>
+      <small>Heartbeat ${escapeHtml(formatRelativeTime(machine.heartbeat_at))}</small>
+      <small>Version ${escapeHtml(machine.panel_version || "unknown")}</small>
+      <small>${machine.accept_jobs ? "Accepting remote jobs" : "Remote launch paused"}</small>
+    </div>
+  `;
+}
+
+function jobSummary(jobs) {
+  if (!jobs.length) return empty("No recent jobs.");
+  return `<div class="mini-list">${jobs.map((job) => `
+    <div>
+      <strong>${escapeHtml(job.type)}</strong>
+      <span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span>
+      <small>${escapeHtml(formatRelativeTime(job.created_at))}</small>
+    </div>`).join("")}</div>`;
+}
+
+function trainView() {
+  const preset = selectedPreset();
+  const disabled = !canOperate(role());
+  return `
+    <section class="split-grid">
+      <article class="panel">
+        <h2>Launch Training</h2>
+        <p class="muted">Queues a job for mother. The worker will run one Isaac/GPU action at a time.</p>
+        <label>Machine ID <input id="machine-id" value="${escapeHtml(state.machineId)}"></label>
+        <label>Task <input id="task" value="Template-Redrhex-Direct-v0"></label>
+        <div class="input-row">
+          <label>Envs <input id="num-envs" type="number" min="1" max="8192" value="4"></label>
+          <label>Iterations <input id="max-iterations" type="number" min="1" max="100000" value="8"></label>
+        </div>
+        <label>Device <input id="device" value="cuda:0"></label>
+        <label>Reward Preset
+          <select id="train-preset">
+            ${state.snapshot.presets.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === preset.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}
+          </select>
+        </label>
+        <button class="primary wide" data-action="queue-training" ${disabled ? "disabled" : ""}>Queue Training</button>
+        ${disabled ? `<p class="muted">Viewer accounts can inspect but cannot launch training.</p>` : ""}
+      </article>
+      <article class="panel">
+        <h2>Preset Snapshot</h2>
+        <h3>${escapeHtml(preset.name)}</h3>
+        <p class="muted">${escapeHtml(preset.description || "No description.")}</p>
+        ${rewardSnapshot(preset.values)}
+      </article>
+    </section>
+  `;
+}
+
+function rewardSnapshot(values) {
+  const entries = Object.entries(values || {});
+  if (!entries.length) return empty("Baseline uses the current local defaults from mother.");
+  return `<div class="reward-snapshot">${entries.map(([key, value]) => `
+    <div><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</div>`;
+}
+
+function rewardsView() {
+  const preset = state.draftPreset || selectedPreset();
+  const editable = canEditPreset(role()) && !preset.built_in;
+  return `
+    <section class="split-grid rewards-layout">
+      <aside class="panel preset-list">
+        <div class="section-head compact">
+          <h2>Shared Presets</h2>
+          <button data-action="new-preset" ${!canEditPreset(role()) ? "disabled" : ""}>New</button>
+        </div>
+        ${state.snapshot.presets.map((item) => `
+          <button class="preset-button ${item.id === preset.id ? "active" : ""}" data-action="select-preset" data-id="${escapeHtml(item.id)}">
+            <strong>${escapeHtml(item.name)}</strong>
+            <small>${item.built_in ? "Built-in" : "Team preset"} - ${escapeHtml(formatRelativeTime(item.updated_at))}</small>
+          </button>`).join("") || empty("Apply the V2.0 schema to create presets.")}
+      </aside>
+      <article class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Reward Tuning</h2>
+            <p class="muted">Operators and admins can save team presets. Viewers can inspect snapshots.</p>
+          </div>
+          <div class="button-row">
+            <button data-action="duplicate-preset" ${!canEditPreset(role()) ? "disabled" : ""}>Duplicate</button>
+            <button class="primary" data-action="save-preset" ${!editable ? "disabled" : ""}>Save Preset</button>
+          </div>
+        </div>
+        <label>Name <input id="preset-name" value="${escapeHtml(preset.name)}" ${editable ? "" : "disabled"}></label>
+        <label>Description <textarea id="preset-description" ${editable ? "" : "disabled"}>${escapeHtml(preset.description)}</textarea></label>
+        <div class="reward-editor">
+          ${REWARD_FIELDS.map((group) => `
+            <section class="reward-group">
+              <h3>${escapeHtml(group.name)}</h3>
+              ${group.fields.map(([key, label, help]) => {
+                const value = Number(preset.values?.[key] ?? 0);
+                return `
+                  <label class="reward-row">
+                    <span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small><code>${escapeHtml(key)}</code></span>
+                    <input class="reward-input" data-key="${escapeHtml(key)}" type="number" step="0.01" value="${escapeHtml(value)}" ${editable ? "" : "disabled"}>
+                  </label>`;
+              }).join("")}
+            </section>`).join("")}
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function filteredRuns() {
+  const q = state.runSearch.trim().toLowerCase();
+  return state.snapshot.runs.filter((run) => {
+    const folder = run.folder || "";
+    if (state.folderFilter === "uncategorized" && folder) return false;
+    if (state.folderFilter !== "all" && state.folderFilter !== "uncategorized" && folder !== state.folderFilter) return false;
+    if (!q) return true;
+    return `${run.id} ${run.display_name || ""} ${run.status || ""} ${folder}`.toLowerCase().includes(q);
+  });
+}
+
+function folders() {
+  const set = new Set(state.snapshot.runs.map((run) => run.folder).filter(Boolean));
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+function historyView() {
+  const run = selectedRun();
+  const runs = filteredRuns();
+  return `
+    <section class="history-layout">
+      <aside class="panel run-list-panel">
+        <div class="section-head compact">
+          <h2>History</h2>
+          <button data-action="refresh">Refresh</button>
+        </div>
+        <input id="run-search" placeholder="Search runs" value="${escapeHtml(state.runSearch)}">
+        <select id="folder-filter">
+          <option value="all" ${state.folderFilter === "all" ? "selected" : ""}>All runs</option>
+          <option value="uncategorized" ${state.folderFilter === "uncategorized" ? "selected" : ""}>Uncategorized</option>
+          ${folders().map((folder) => `<option value="${escapeHtml(folder)}" ${state.folderFilter === folder ? "selected" : ""}>${escapeHtml(folder)}</option>`).join("")}
+        </select>
+        <div class="run-list">${runs.map(runCard).join("") || empty("No matching runs.")}</div>
+      </aside>
+      <article class="panel run-details">
+        ${run ? runDetails(run) : empty("Select a run.")}
+      </article>
+    </section>
+  `;
+}
+
+function renderRunListOnly() {
+  const list = document.querySelector(".run-list");
+  if (list) list.innerHTML = filteredRuns().map(runCard).join("") || empty("No matching runs.");
+}
+
+function runCard(run) {
+  const videoArtifact = latestVideoArtifact(run.id, state.snapshot.artifacts);
+  const active = run.id === state.selectedRunId;
+  return `
+    <button class="run-card ${active ? "active" : ""}" data-action="select-run" data-id="${escapeHtml(run.id)}">
+      <span class="run-card-top">
+        <strong>${escapeHtml(run.display_name || run.id)}</strong>
+        <span class="badge ${statusTone(run.status)}">${escapeHtml(run.status || "unknown")}</span>
+      </span>
+      <small>${escapeHtml(run.folder || "Uncategorized")} - ${escapeHtml(formatRelativeTime(run.created_at))}</small>
+      <small>${run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"}${videoArtifact ? " - team video" : ""}${run.onnx_path ? " - ONNX" : ""}</small>
+    </button>
+  `;
+}
+
+function runDetails(run) {
+  const videoArtifact = latestVideoArtifact(run.id, state.snapshot.artifacts);
+  const signed = videoArtifact ? state.signedVideos[videoArtifact.storage_path] : "";
+  const editable = canEditRun(role());
+  const runnable = canOperate(role()) && Boolean(run.latest_checkpoint);
+  const relatedJobs = state.snapshot.jobs.filter((job) => {
+    const payload = job.payload || {};
+    const result = job.result || {};
+    return payload.run_id === run.id || result.local_run_id === run.id || result.process_id === run.id;
+  }).slice(0, 8);
+  return `
+    <div class="section-head">
+      <div>
+        <h2>${escapeHtml(run.display_name || run.id)}</h2>
+        <p class="muted">${escapeHtml(run.id)}</p>
+      </div>
+      <span class="badge ${statusTone(run.status)}">${escapeHtml(run.status || "unknown")}</span>
+    </div>
+    <div class="details-grid">
+      <div><span>Checkpoint</span><strong>${run.latest_checkpoint ? "ready" : "missing"}</strong></div>
+      <div><span>Video</span><strong>${videoArtifact ? "team-ready" : run.latest_video ? "local only" : "missing"}</strong></div>
+      <div><span>ONNX</span><strong>${run.onnx_path ? "ready" : "missing"}</strong></div>
+      <div><span>Updated</span><strong>${escapeHtml(formatRelativeTime(run.updated_at || run.created_at))}</strong></div>
+    </div>
+    <section class="subpanel">
+      <h3>Run Metadata</h3>
+      <label>Name <input id="run-name" value="${escapeHtml(run.display_name || "")}" ${editable ? "" : "disabled"}></label>
+      <label>Folder <input id="run-folder" value="${escapeHtml(run.folder || "")}" placeholder="e.g. gait tests" ${editable ? "" : "disabled"}></label>
+      <label>Notes <textarea id="run-notes" ${editable ? "" : "disabled"}>${escapeHtml(run.notes || "")}</textarea></label>
+      <button data-action="save-run" ${editable ? "" : "disabled"}>Save Notes / Folder</button>
+    </section>
+    <section class="subpanel">
+      <h3>Team Video</h3>
+      ${videoArtifact ? `
+        ${signed ? `<video controls src="${escapeHtml(signed)}"></video>` : `<p class="muted">Video is stored privately. Load a signed team-only link when you want to watch it.</p>`}
+        <div class="button-row">
+          <button data-action="load-video" data-path="${escapeHtml(videoArtifact.storage_path)}">Load Video</button>
+          <button data-action="copy-video-path" data-path="${escapeHtml(videoArtifact.storage_path)}">Copy Storage Path</button>
+        </div>` : `<p class="muted">No uploaded team video yet. Queue recording from this run after a checkpoint exists.</p>`}
+    </section>
+    <section class="subpanel">
+      <h3>Safe Remote Actions</h3>
+      <div class="button-row wrap">
+        <button data-action="job-record-video" ${runnable ? "" : "disabled"}>Record Video</button>
+        <button data-action="job-export-onnx" ${runnable ? "" : "disabled"}>Export ONNX</button>
+        <button data-action="job-stop" ${canOperate(role()) ? "" : "disabled"}>Stop Active Process</button>
+      </div>
+    </section>
+    <section class="subpanel">
+      <h3>Related Jobs</h3>
+      ${relatedJobs.length ? `<div class="mini-list">${relatedJobs.map((job) => `
+        <div><strong>${escapeHtml(job.type)}</strong><span class="badge ${statusTone(job.status)}">${escapeHtml(job.status)}</span><small>${escapeHtml(formatRelativeTime(job.created_at))}</small></div>
+      `).join("")}</div>` : empty("No remote jobs linked to this run yet.")}
+    </section>
+  `;
+}
+
+function connectionView() {
+  const checks = healthChecks();
+  return `
+    <section class="connection-grid">
+      <article class="panel span-2">
+        <div class="section-head">
+          <div>
+            <h2>Connection</h2>
+            <p class="muted">Use this page first when the phone UI feels disconnected.</p>
+          </div>
+          <div class="button-row">
+            <button data-action="refresh">Run Checks</button>
+            <button data-action="sign-out">Sign Out</button>
+          </div>
+        </div>
+        <div class="check-list">
+          ${checks.map(([, label, ok, detail]) => `
+            <div class="${ok ? "ok" : "warn"}">
+              <strong>${escapeHtml(label)}</strong>
+              <span>${ok ? "pass" : "check"}</span>
+              <small>${escapeHtml(detail)}</small>
+            </div>`).join("")}
+        </div>
+      </article>
+      <article class="panel">
+        <h2>Target Machine</h2>
+        <label>Machine ID <input id="connection-machine-id" value="${escapeHtml(state.machineId)}"></label>
+        <button data-action="save-machine">Save Target</button>
+      </article>
+      <article class="panel">
+        <h2>Account</h2>
+        <p><strong>${escapeHtml(state.user?.email || "")}</strong></p>
+        <p class="muted">Role: ${escapeHtml(role())}</p>
+        <p class="muted">Project: ${escapeHtml(new URL(SUPABASE_URL).host)}</p>
+      </article>
+    </section>
+  `;
+}
+
+function empty(text) {
+  return `<p class="muted empty">${escapeHtml(text)}</p>`;
+}
+
+function collectRewardValues() {
+  const values = {};
+  document.querySelectorAll(".reward-input").forEach((input) => {
+    values[input.dataset.key] = Number(input.value || 0);
+  });
+  return values;
+}
+
+async function handleLogin() {
+  const email = document.querySelector("#login-email")?.value || "";
+  const password = document.querySelector("#login-password")?.value || "";
+  await signIn(email, password);
+  state.user = await currentUser();
+  await loadProfile();
+  await refresh();
+  setMessage("Signed in.");
 }
 
 async function queueTraining() {
-  saveConfig();
-  if (!state.accessToken) throw new Error("Login first.");
-  const payload = {
-    task: $("#task").value,
-    num_envs: Number($("#num-envs").value),
-    max_iterations: Number($("#max-iterations").value),
-    device: $("#device").value,
-    headless: true,
+  state.machineId = document.querySelector("#machine-id")?.value || state.machineId;
+  localStorage.setItem("redrhex_machine_id", state.machineId);
+  const presetId = document.querySelector("#train-preset")?.value || state.selectedPresetId;
+  state.selectedPresetId = presetId;
+  localStorage.setItem("redrhex_child_preset", presetId);
+  const preset = selectedPreset();
+  const params = {
+    task: document.querySelector("#task")?.value || "Template-Redrhex-Direct-v0",
+    num_envs: Number(document.querySelector("#num-envs")?.value || 4),
+    max_iterations: Number(document.querySelector("#max-iterations")?.value || 8),
+    device: document.querySelector("#device")?.value || "cuda:0",
   };
-  await supabaseFetch("/rest/v1/jobs", {
-    method: "POST",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify({
-      machine_id: state.machineId || null,
-      type: "start_training",
-      payload,
-      actor_role: state.profile?.role || "viewer",
-    }),
-  });
-  status("Training job queued.");
-  await refreshAll();
+  const job = buildTrainingJob({ machineId: state.machineId, params, preset, role: role(), userId: state.user?.id });
+  await insert("jobs", job);
+  await refresh();
+  setMessage(`Queued training with ${preset.name}.`);
 }
 
-function renderList(selector, rows, renderer) {
-  $(selector).innerHTML = rows.length ? rows.map(renderer).join("") : `<p class="muted">No records yet.</p>`;
+async function savePreset() {
+  const preset = state.draftPreset || selectedPreset();
+  if (preset.built_in) return;
+  const payload = {
+    id: preset.id,
+    name: document.querySelector("#preset-name")?.value || preset.name,
+    description: document.querySelector("#preset-description")?.value || "",
+    values: collectRewardValues(),
+    built_in: false,
+    updated_by: state.user?.id || null,
+    updated_at: new Date().toISOString(),
+  };
+  if (!preset.created_by) payload.created_by = state.user?.id || null;
+  await upsert("reward_presets", payload);
+  state.draftPreset = null;
+  state.selectedPresetId = payload.id;
+  await refresh();
+  setMessage(`Saved preset ${payload.name}.`);
 }
 
-async function refreshAll() {
-  const [machines, jobs, runs] = await Promise.all([
-    supabaseFetch("/rest/v1/machines?select=*&order=heartbeat_at.desc"),
-    supabaseFetch("/rest/v1/jobs?select=*&order=created_at.desc&limit=20"),
-    supabaseFetch("/rest/v1/runs?select=*&order=created_at.desc&limit=40"),
-  ]);
-  renderList("#machines", machines, (machine) => `
-    <div class="item">
-      <strong>${escapeHtml(machine.machine_id)}</strong>
-      <span>${machine.online ? "online" : "offline"} · ${machine.accept_jobs ? "accepting jobs" : "paused"}</span>
-      <small>${escapeHtml(machine.panel_version || "")} · ${escapeHtml(machine.heartbeat_at || "")}</small>
-    </div>`);
-  renderList("#jobs", jobs, (job) => `
-    <div class="item">
-      <strong>${escapeHtml(job.type)}</strong>
-      <span>${escapeHtml(job.status)} · ${escapeHtml(job.machine_id || "any machine")}</span>
-      <small>${escapeHtml(job.created_at || "")}</small>
-    </div>`);
-  renderList("#runs", runs, (run) => `
-    <div class="item">
-      <strong>${escapeHtml(run.display_name || run.id)}</strong>
-      <span>${escapeHtml(run.status || "unknown")}</span>
-      <small>${escapeHtml(run.latest_checkpoint || "no checkpoint")}</small>
-      ${run.latest_video ? `<small>video: ${escapeHtml(run.latest_video)}</small>` : ""}
-      ${run.onnx_path ? `<small>ONNX: ${escapeHtml(run.onnx_path)}</small>` : ""}
-    </div>`);
+function duplicatePreset() {
+  const source = state.draftPreset || selectedPreset();
+  const id = slugify(`${source.id || source.name}-copy`);
+  state.draftPreset = {
+    ...source,
+    id,
+    name: `${source.name} Copy`,
+    built_in: false,
+    values: { ...(source.values || {}) },
+    created_by: state.user?.id || null,
+  };
+  state.selectedPresetId = id;
+  render();
 }
 
-$("#login").addEventListener("click", () => login().catch((error) => status(error.message)));
-$("#queue-training").addEventListener("click", () => queueTraining().catch((error) => status(error.message)));
-$("#refresh").addEventListener("click", () => refreshAll().catch((error) => status(error.message)));
+function newPreset() {
+  const id = slugify(`team-preset-${Date.now()}`);
+  state.draftPreset = {
+    id,
+    name: "New Team Preset",
+    description: "",
+    values: {},
+    built_in: false,
+    created_by: state.user?.id || null,
+  };
+  state.selectedPresetId = id;
+  render();
+}
 
-hydrateForm();
-if (state.accessToken) refreshAll().catch((error) => status(error.message));
+async function saveRun() {
+  const run = selectedRun();
+  if (!run) return;
+  await update(
+    "runs",
+    `id=eq.${encodeURIComponent(run.id)}`,
+    {
+      display_name: document.querySelector("#run-name")?.value || null,
+      folder: document.querySelector("#run-folder")?.value || null,
+      notes: document.querySelector("#run-notes")?.value || "",
+    },
+  );
+  await refresh();
+  setMessage("Run metadata saved.");
+}
+
+async function queueRunAction(type, message) {
+  const run = selectedRun();
+  if (!run) return;
+  const job = buildActionJob({ machineId: state.machineId, type, runId: run.id, role: role(), userId: state.user?.id });
+  await insert("jobs", job);
+  await refresh();
+  setMessage(message);
+}
+
+async function loadVideo(storagePath) {
+  state.signedVideos[storagePath] = await createSignedVideoUrl(storagePath);
+  render();
+}
+
+function render() {
+  app.innerHTML = shell();
+}
+
+document.addEventListener("click", async (event) => {
+  const target = event.target.closest("[data-action]");
+  if (!target) return;
+  event.preventDefault();
+  const action = target.dataset.action;
+  try {
+    if (action === "view") return setView(target.dataset.view);
+    if (action === "login") return await handleLogin();
+    if (action === "refresh") return await refresh();
+    if (action === "sign-out") {
+      await signOut();
+      state.user = null;
+      state.profile = null;
+      setMessage("Signed out.");
+      return;
+    }
+    if (action === "save-machine") {
+      state.machineId = document.querySelector("#connection-machine-id")?.value || state.machineId;
+      localStorage.setItem("redrhex_machine_id", state.machineId);
+      await refresh();
+      return setMessage("Machine target saved.");
+    }
+    if (action === "queue-training") return await queueTraining();
+    if (action === "select-preset") {
+      state.selectedPresetId = target.dataset.id;
+      state.draftPreset = null;
+      localStorage.setItem("redrhex_child_preset", state.selectedPresetId);
+      return render();
+    }
+    if (action === "duplicate-preset") return duplicatePreset();
+    if (action === "new-preset") return newPreset();
+    if (action === "save-preset") return await savePreset();
+    if (action === "select-run") {
+      state.selectedRunId = target.dataset.id;
+      return render();
+    }
+    if (action === "save-run") return await saveRun();
+    if (action === "load-video") return await loadVideo(target.dataset.path);
+    if (action === "copy-video-path") {
+      await navigator.clipboard.writeText(target.dataset.path || "");
+      return setMessage("Video storage path copied.");
+    }
+    if (action === "job-record-video") return await queueRunAction("record_video", "Queued video recording.");
+    if (action === "job-export-onnx") return await queueRunAction("export_onnx", "Queued ONNX export.");
+    if (action === "job-stop") return await queueRunAction("stop_process", "Queued stop request.");
+  } catch (error) {
+    setMessage(error.message);
+  }
+});
+
+document.addEventListener("change", (event) => {
+  if (event.target.id === "train-preset") {
+    state.selectedPresetId = event.target.value;
+    localStorage.setItem("redrhex_child_preset", state.selectedPresetId);
+    render();
+  }
+  if (event.target.id === "folder-filter") {
+    state.folderFilter = event.target.value;
+    renderRunListOnly();
+  }
+});
+
+document.addEventListener("input", (event) => {
+  if (event.target.id === "run-search") {
+    state.runSearch = event.target.value;
+    renderRunListOnly();
+  }
+  if (event.target.classList.contains("reward-input") && state.draftPreset) {
+    state.draftPreset.values[event.target.dataset.key] = Number(event.target.value || 0);
+  }
+});
+
+boot().catch((error) => {
+  state.loadError = error.message;
+  render();
+});

@@ -1,0 +1,34 @@
+# RedRHex Child Remote Panel
+
+GitHub Pages child UI for the RedRHex Training Panel V2.0 remote system.
+
+Open:
+
+```text
+https://popcorn-volcano.github.io/redrhex-training-remote/
+```
+
+This page is static and safe to host publicly. It contains only the Supabase URL and publishable key. The private machine token stays on the training PC in `~/.redrhex_remote.env`.
+
+## What The Child Can Do
+
+- Check Supabase login, role, machine heartbeat, worker acceptance, GPU lock, and video storage readiness.
+- Queue training jobs with task/env/iteration/device settings.
+- Select shared reward presets and send a full reward snapshot with each training job.
+- Create, duplicate, and save shared reward presets as operator/admin.
+- Review synced run history, notes, folders, checkpoints, videos, ONNX state, and related jobs.
+- Queue safe remote actions: record video, export ONNX, and stop active process.
+- Play private MP4 artifacts through short-lived Supabase signed URLs.
+
+Mother-only features remain in the local panel: terminal/process console, tmux attach, local file opening, compact/delete, and worker launch/control.
+
+## Deploy
+
+Push this repository to `main`. GitHub Pages deploys the static files from the repository root through the Pages workflow.
+
+Before using the new Rewards/Video features, apply the latest mother schema:
+
+```text
+tools/training_panel/supabase/schema.sql
+```
+

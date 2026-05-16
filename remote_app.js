@@ -47,7 +47,7 @@ const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
   : { matches: false, addEventListener: null, addListener: null };
 const THEME_KEY = "redrhex_to_go_theme";
-const VIEW_IDS = ["train", "rewards", "history", "connection", "dashboard"];
+const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 
 function initialView() {
   const stored = localStorage.getItem("redrhex_child_view");

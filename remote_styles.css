@@ -49,6 +49,7 @@ button {
   padding: 9px 12px;
   font-weight: 800;
   cursor: pointer;
+  min-height: 40px;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
@@ -68,6 +69,7 @@ select,
 textarea {
   width: 100%;
   padding: 9px 10px;
+  min-height: 40px;
 }
 
 textarea {
@@ -174,6 +176,9 @@ video {
 }
 
 .nav-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
   gap: 8px;
   overflow-x: auto;
@@ -405,15 +410,72 @@ video {
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
 }
 
+.rewards-page {
+  display: grid;
+  grid-template-columns: minmax(240px, 310px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.rewards-rail {
+  position: sticky;
+  top: 82px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 98px);
+  overflow: hidden;
+}
+
+.reward-rail-head {
+  gap: 12px;
+}
+
+.icon-action {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.preset-scroll {
+  display: grid;
+  gap: 9px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.reward-workspace {
+  min-width: 0;
+}
+
+.reward-head {
+  gap: 14px;
+}
+
+.preset-meta-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.preset-meta-grid textarea {
+  min-height: 64px;
+}
+
 .reward-editor {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  align-items: start;
 }
 
 .reward-group {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
+  min-width: 0;
 }
 
 .reward-row {
@@ -455,7 +517,8 @@ video {
   }
 
   .history-layout,
-  .rewards-layout {
+  .rewards-layout,
+  .rewards-page {
     grid-template-columns: 1fr;
   }
 
@@ -463,12 +526,51 @@ video {
     position: static;
     max-height: none;
   }
+
+  .rewards-rail {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .preset-scroll {
+    display: flex;
+    overflow-x: auto;
+    padding: 0 0 4px;
+  }
+
+  .preset-button {
+    min-width: min(260px, 78vw);
+  }
+
+  .preset-meta-grid,
+  .reward-editor {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
+  body {
+    font-size: 15px;
+  }
+
   .remote-shell {
-    width: min(100vw - 18px, 1260px);
-    padding-top: 14px;
+    width: 100%;
+    padding: 10px 10px 48px;
+  }
+
+  h1 {
+    font-size: clamp(26px, 8vw, 34px);
+  }
+
+  button,
+  input,
+  select {
+    min-height: 44px;
+  }
+
+  textarea {
+    min-height: 110px;
   }
 
   .topbar,
@@ -485,11 +587,49 @@ video {
     grid-template-columns: 1fr;
   }
 
+  .topbar {
+    margin-bottom: 10px;
+  }
+
+  .top-status {
+    gap: 6px;
+  }
+
+  .nav-tabs {
+    margin: 0 -4px 12px;
+    border-radius: 7px;
+  }
+
+  .nav-tabs button {
+    padding-inline: 14px;
+  }
+
+  .panel {
+    padding: 13px;
+  }
+
+  .run-list-panel {
+    max-height: 48vh;
+    overflow: auto;
+  }
+
+  .run-details {
+    min-height: 0;
+  }
+
+  .section-head {
+    gap: 8px;
+  }
+
   .button-row {
     align-items: stretch;
   }
 
   .button-row > button {
     flex: 1;
+  }
+
+  .reward-row input {
+    width: 100%;
   }
 }

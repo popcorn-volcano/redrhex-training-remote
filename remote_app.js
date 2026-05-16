@@ -76,9 +76,13 @@ function selectedRun() {
   return state.snapshot.runs.find((run) => run.id === state.selectedRunId) || state.snapshot.runs[0] || null;
 }
 
-function setMessage(message) {
+function setMessage(message, options = {}) {
   state.message = message;
-  render();
+  if (options.forceRender || !app.querySelector("#message-notice")) {
+    render();
+  } else {
+    patchShellStatus();
+  }
 }
 
 function setView(view) {
@@ -205,8 +209,8 @@ function shell() {
     <header class="topbar">
       <div>
         <p class="eyebrow">BioRoLa ABAD RHex Team</p>
-        <h1>RedRHex Child Remote Panel V2.0</h1>
-        <p class="subcopy">A simplified mother panel for team training, reward tuning, history, and shared results.</p>
+        <h1>RedRHex To Go</h1>
+        <p class="subcopy">Team training, reward tuning, history, and shared results from anywhere.</p>
       </div>
       <div class="top-status">
         <span id="machine-state-badge" class="badge ${tone}">${escapeHtml(machineState(machine))}</span>
@@ -342,12 +346,18 @@ function trainView() {
         ${disabled ? `<p class="muted">Viewer accounts can inspect but cannot launch training.</p>` : ""}
       </article>
       <article class="panel">
-        <h2>Preset Snapshot</h2>
-        <h3>${escapeHtml(preset.name)}</h3>
-        <p class="muted">${escapeHtml(preset.description || "No description.")}</p>
-        ${rewardSnapshot(preset.values)}
+        <div id="train-preset-snapshot">${trainPresetSnapshot(preset)}</div>
       </article>
     </section>
+  `;
+}
+
+function trainPresetSnapshot(preset) {
+  return `
+    <h2>Preset Snapshot</h2>
+    <h3>${escapeHtml(preset.name)}</h3>
+    <p class="muted">${escapeHtml(preset.description || "No description.")}</p>
+    ${rewardSnapshot(preset.values)}
   `;
 }
 
@@ -363,32 +373,39 @@ function rewardsView() {
   const rewardSchemaReady = Boolean(state.snapshot.schema?.rewardPresets);
   const editable = rewardSchemaReady && canEditPreset(role()) && !preset.built_in;
   return `
-    <section class="split-grid rewards-layout">
-      <aside class="panel preset-list">
-        <div class="section-head compact">
-          <h2>Shared Presets</h2>
-          <button data-action="new-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>New</button>
+    <section class="rewards-page">
+      <aside class="panel preset-list rewards-rail">
+        <div class="section-head compact reward-rail-head">
+          <div>
+            <h2>Presets</h2>
+            <p class="muted">Shared reward recipes</p>
+          </div>
+          <button class="icon-action" title="New preset" data-action="new-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>+</button>
         </div>
         ${rewardSchemaReady ? "" : `<p class="muted">Using built-in fallback presets until Supabase schema is updated.</p>`}
-        ${state.snapshot.presets.map((item) => `
+        <div class="preset-scroll">
+          ${state.snapshot.presets.map((item) => `
           <button class="preset-button ${item.id === preset.id ? "active" : ""}" data-action="select-preset" data-id="${escapeHtml(item.id)}">
             <strong>${escapeHtml(item.name)}</strong>
-            <small>${item.built_in ? "Built-in" : "Team preset"} - ${escapeHtml(formatRelativeTime(item.updated_at))}</small>
+            <small>${item.built_in ? "Built-in" : "Team preset"} · ${escapeHtml(formatRelativeTime(item.updated_at))}</small>
           </button>`).join("") || empty("Apply the V2.0 schema to create presets.")}
+        </div>
       </aside>
-      <article class="panel">
-        <div class="section-head">
+      <article class="panel reward-workspace">
+        <div class="section-head reward-head">
           <div>
             <h2>Reward Tuning</h2>
-            <p class="muted">Operators and admins can save team presets. Viewers can inspect snapshots.</p>
+            <p class="muted">${escapeHtml(preset.built_in ? "Built-in preset. Duplicate it before editing." : editable ? "Editable team preset." : "Read-only preset.")}</p>
           </div>
           <div class="button-row">
             <button data-action="duplicate-preset" ${!rewardSchemaReady || !canEditPreset(role()) ? "disabled" : ""}>Duplicate</button>
             <button class="primary" data-action="save-preset" ${!editable ? "disabled" : ""}>Save Preset</button>
           </div>
         </div>
-        <label>Name <input id="preset-name" value="${escapeHtml(preset.name)}" ${editable ? "" : "disabled"}></label>
-        <label>Description <textarea id="preset-description" ${editable ? "" : "disabled"}>${escapeHtml(preset.description)}</textarea></label>
+        <div class="preset-meta-grid">
+          <label>Name <input id="preset-name" value="${escapeHtml(preset.name)}" ${editable ? "" : "disabled"}></label>
+          <label>Description <textarea id="preset-description" ${editable ? "" : "disabled"}>${escapeHtml(preset.description)}</textarea></label>
+        </div>
         <div class="reward-editor">
           ${REWARD_FIELDS.map((group) => `
             <section class="reward-group">
@@ -663,9 +680,12 @@ function patchDashboard() {
 function patchRunList() {
   const list = document.querySelector(".run-list");
   if (!list) return;
+  const panel = document.querySelector(".run-list-panel");
+  const panelScrollTop = panel?.scrollTop || 0;
   const scrollTop = list.scrollTop;
   list.innerHTML = filteredRuns().map(runCard).join("") || empty("No matching runs.");
   list.scrollTop = scrollTop;
+  if (panel) panel.scrollTop = panelScrollTop;
 }
 
 function isRunMetadataFocused() {
@@ -777,7 +797,7 @@ async function queueTraining() {
   };
   const job = buildTrainingJob({ machineId: state.machineId, params, preset, role: role(), userId: state.user?.id });
   await insert("jobs", job);
-  await refresh();
+  await refresh({ silent: true });
   setMessage(`Queued training with ${preset.name}.`);
 }
 
@@ -842,7 +862,7 @@ async function saveRun() {
     buildRunMetadataPatch({ displayName, folder, notes }),
   );
   delete state.runDrafts[run.id];
-  await refresh();
+  await refresh({ silent: true });
   setMessage("Run metadata saved.");
 }
 
@@ -851,7 +871,7 @@ async function queueRunAction(type, message) {
   if (!run) return;
   const job = buildActionJob({ machineId: state.machineId, type, runId: run.id, role: role(), userId: state.user?.id });
   await insert("jobs", job);
-  await refresh();
+  await refresh({ silent: true });
   setMessage(message);
 }
 
@@ -881,19 +901,19 @@ document.addEventListener("click", async (event) => {
   try {
     if (action === "view") return setView(target.dataset.view);
     if (action === "login") return await handleLogin();
-    if (action === "refresh") return await refresh();
+    if (action === "refresh") return await refresh({ silent: true });
     if (action === "sign-out") {
       await signOut();
       state.user = null;
       state.profile = null;
       if (state.refreshTimer) clearTimeout(state.refreshTimer);
-      setMessage("Signed out.");
+      setMessage("Signed out.", { forceRender: true });
       return;
     }
     if (action === "save-machine") {
       state.machineId = document.querySelector("#connection-machine-id")?.value || state.machineId;
       localStorage.setItem("redrhex_machine_id", state.machineId);
-      await refresh();
+      await refresh({ silent: true });
       return setMessage("Machine target saved.");
     }
     if (action === "queue-training") return await queueTraining();
@@ -909,6 +929,11 @@ document.addEventListener("click", async (event) => {
     if (action === "select-run") {
       state.selectedRunId = target.dataset.id;
       await ensureSelectedVideoSigned();
+      if (state.view === "history") {
+        patchHistory();
+        patchShellStatus();
+        return;
+      }
       return render();
     }
     if (action === "save-run") return await saveRun();
@@ -929,7 +954,12 @@ document.addEventListener("change", (event) => {
   if (event.target.id === "train-preset") {
     state.selectedPresetId = event.target.value;
     localStorage.setItem("redrhex_child_preset", state.selectedPresetId);
-    render();
+    const snapshot = document.querySelector("#train-preset-snapshot");
+    if (snapshot) {
+      snapshot.innerHTML = trainPresetSnapshot(selectedPreset());
+    } else {
+      render();
+    }
   }
   if (event.target.id === "folder-filter") {
     state.folderFilter = event.target.value;

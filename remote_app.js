@@ -51,6 +51,7 @@ const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashb
 
 function initialView() {
   const stored = localStorage.getItem("redrhex_child_view");
+  if (stored === "dashboard") return "train";
   return VIEW_IDS.includes(stored) ? stored : "train";
 }
 

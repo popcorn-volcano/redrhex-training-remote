@@ -489,15 +489,21 @@ video {
   background: var(--hero-bg);
 }
 
-.health-grid,
-.details-grid {
+.health-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .health-card,
 .details-grid > div,
+.run-info-card,
 .machine-card,
 .subpanel,
 .mini-list > div {
@@ -529,9 +535,55 @@ video {
 }
 
 .machine-card,
-.details-grid > div {
+.details-grid > div,
+.run-info-card {
   display: grid;
   gap: 5px;
+}
+
+.run-info-card > span,
+.run-info-list em,
+.video-context span,
+.video-context small {
+  color: var(--muted);
+}
+
+.run-info-card > strong {
+  font-size: 19px;
+  text-transform: capitalize;
+}
+
+.run-info-card > strong.good {
+  color: var(--good);
+}
+
+.run-info-card > strong.info {
+  color: var(--info);
+}
+
+.run-info-card > strong.bad {
+  color: var(--bad);
+}
+
+.run-info-list {
+  display: grid;
+  gap: 5px;
+}
+
+.run-info-list small {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.run-info-list strong {
+  color: var(--text);
+}
+
+.run-info-list em {
+  font-style: normal;
+  white-space: nowrap;
 }
 
 .run-strip,
@@ -977,6 +1029,29 @@ video {
   max-height: 52vh;
   border-radius: 8px;
   background: #000;
+}
+
+.video-context {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 12px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.video-context strong {
+  font-size: 18px;
+}
+
+.video-now {
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+
+.video-now strong {
+  color: var(--text);
 }
 
 .check-list {

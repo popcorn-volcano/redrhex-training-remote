@@ -1062,12 +1062,39 @@ function runDetailsGrid(run) {
   const params = run.params || {};
   const rewardOverrides = Object.keys(params.reward_overrides || run.reward_overrides || {}).length;
   const terrainOverrides = Object.keys(params.terrain_overrides || run.terrain_overrides || {}).length;
+  const checkpointIter = checkpointIteration(run.latest_checkpoint);
+  const checkpointLabel = run.latest_checkpoint
+    ? Number.isFinite(checkpointIter) ? `Iteration ${checkpointIter}` : run.latest_checkpoint.split("/").pop()
+    : "Missing";
+  const videoLabel = video.state === "ready"
+    ? "Team video ready"
+    : video.state === "uploading"
+      ? "Uploading to team storage"
+      : video.state === "recordable"
+        ? "Ready to record"
+        : "No checkpoint yet";
+  const rewardPreset = run.reward_preset_id || params.reward_preset_id || "baseline";
+  const terrainPreset = run.terrain_preset_id || params.terrain_preset_id || "baseline";
   return `
-    <div><span>Checkpoint</span><strong>${run.latest_checkpoint ? "ready" : "missing"}</strong></div>
-    <div><span>Video</span><strong>${escapeHtml(video.state)}</strong></div>
-    <div><span>Reward</span><strong>${escapeHtml(run.reward_preset_id || params.reward_preset_id || "baseline")} · ${rewardOverrides}</strong></div>
-    <div><span>Terrain</span><strong>${escapeHtml(run.terrain_preset_id || params.terrain_preset_id || "baseline")} · ${terrainOverrides}</strong></div>
-    <div><span>Updated</span><strong>${escapeHtml(formatRelativeTime(run.updated_at || run.created_at))}</strong></div>
+    <article class="run-info-card">
+      <span>Run State</span>
+      <strong class="${statusTone(run.status)}">${escapeHtml(run.status || "unknown")}</strong>
+      <small>Updated ${escapeHtml(formatRelativeTime(run.updated_at || run.created_at))}</small>
+    </article>
+    <article class="run-info-card">
+      <span>Artifacts</span>
+      <div class="run-info-list">
+        <small>Checkpoint <strong>${escapeHtml(checkpointLabel)}</strong></small>
+        <small>Video <strong>${escapeHtml(videoLabel)}</strong></small>
+      </div>
+    </article>
+    <article class="run-info-card">
+      <span>Training Recipe</span>
+      <div class="run-info-list">
+        <small>Reward <strong>${escapeHtml(rewardPreset)}</strong> <em>${rewardOverrides} override${rewardOverrides === 1 ? "" : "s"}</em></small>
+        <small>Terrain <strong>${escapeHtml(terrainPreset)}</strong> <em>${terrainOverrides} override${terrainOverrides === 1 ? "" : "s"}</em></small>
+      </div>
+    </article>
   `;
 }
 
@@ -1111,28 +1138,39 @@ function teamVideoSection(run) {
   const signed = videoArtifact ? signedVideoEntry(videoArtifact.storage_path)?.url || "" : "";
   const runnable = canOperate(role()) && Boolean(checkpoint);
   const storagePath = videoArtifact?.storage_path || "";
+  const selectedIteration = Number.isFinite(selectedOption?.iteration) ? selectedOption.iteration : checkpointIteration(checkpoint);
+  const selectedLabel = Number.isFinite(selectedIteration)
+    ? `Iteration ${selectedIteration}`
+    : selectedOption?.label || "Selected checkpoint";
+  const checkpointName = checkpoint ? checkpoint.split("/").pop() : "";
   return `
     <section id="team-video-panel" class="subpanel" data-video-state="${escapeHtml(video.state)}" data-storage-path="${escapeHtml(storagePath)}">
       <div class="section-head compact">
         <h3>Team Video</h3>
         <span class="badge ${statusTone(video.state)}">${escapeHtml(video.state)}</span>
       </div>
-      <label>Checkpoint
+      <div class="video-context">
+        <span>Video target</span>
+        <strong>${escapeHtml(selectedLabel)}</strong>
+        ${checkpointName ? `<small>${escapeHtml(checkpointName)}</small>` : ""}
+      </div>
+      <label>Choose checkpoint video
         <select id="video-checkpoint-select" ${options.length ? "" : "disabled"}>
           ${options.map((option) => `<option value="${escapeHtml(option.path)}" ${option.path === checkpoint ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
         </select>
       </label>
       ${video.state === "ready" ? `
+        <p class="video-now">Viewing team video for <strong>${escapeHtml(selectedLabel)}</strong>.</p>
         ${signed ? `<video controls src="${escapeHtml(signed)}"></video>` : `<p class="muted">Preparing a signed team-only video link...</p>`}
         <div class="button-row">
-          <button data-action="load-video" data-path="${escapeHtml(videoArtifact.storage_path)}">Load Video</button>
-          <button data-action="check-video" ${runnable ? "" : "disabled"}>Check / Create Video</button>
+          <button data-action="load-video" data-path="${escapeHtml(videoArtifact.storage_path)}">${signed ? "Refresh Secure Link" : "Load Team Video"}</button>
           <button data-action="copy-video-path" data-path="${escapeHtml(videoArtifact.storage_path)}">Copy Storage Path</button>
         </div>` : video.state === "uploading" ? `
-        <p class="muted">Video exists locally for ${escapeHtml(selectedOption?.label || "this checkpoint")} and is uploading to team storage.</p>
+        <p class="muted">Video for ${escapeHtml(selectedLabel)} exists locally and is uploading to team storage.</p>
+        <button data-action="refresh">Refresh Status</button>
       ` : video.state === "recordable" ? `
-        <p class="muted">No team video yet for ${escapeHtml(selectedOption?.label || "this checkpoint")}.</p>
-        <button class="primary" data-action="check-video" ${runnable ? "" : "disabled"}>Create Video</button>
+        <p class="muted">No team video has been recorded for ${escapeHtml(selectedLabel)} yet.</p>
+        <button class="primary" data-action="check-video" ${runnable ? "" : "disabled"}>Record Video for ${escapeHtml(selectedLabel)}</button>
       ` : `<p class="muted">No checkpoint yet, so video recording is not available.</p>`}
     </section>
   `;
@@ -1141,7 +1179,6 @@ function teamVideoSection(run) {
 function runDetails(run, { context = "desktop" } = {}) {
   const draft = currentRunDraft(run);
   const editable = canEditRun(role());
-  const runnable = canOperate(role()) && Boolean(selectedVideoCheckpoint(run));
   const tweakable = canOperate(role()) && canBuildTweakFromRun(run, state.snapshot.presets);
   return `
     <div class="section-head run-detail-head ${context === "inline" ? "inline" : ""}">
@@ -1166,7 +1203,6 @@ function runDetails(run, { context = "desktop" } = {}) {
       <h3>Safe Remote Actions</h3>
       <div class="button-row wrap">
         <button data-action="tweak-run" ${tweakable ? "" : "disabled"}>Tweak From This Run</button>
-        <button data-action="check-video" ${runnable ? "" : "disabled"}>Check / Create Video</button>
         <button data-action="job-tensorboard" ${canOperate(role()) ? "" : "disabled"}>TensorBoard</button>
         <button data-action="job-compact-run" ${canOperate(role()) ? "" : "disabled"}>Compact Run</button>
       </div>

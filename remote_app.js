@@ -622,14 +622,40 @@ function historyLayout() {
           </div>
           <button data-action="refresh">Refresh</button>
         </div>
-        <div class="folder-toolbar">
-          ${root ? `<span>${folderCount} folder${folderCount === 1 ? "" : "s"}</span>` : `<button data-action="open-folder-root">Back to Folders</button><span>${escapeHtml(currentLabel)}</span>`}
-        </div>
+        ${historyFolderNav({ root, currentLabel, folderCount })}
         <input id="run-search" placeholder="${root ? "Search folders and runs" : "Search this folder"}" value="${escapeHtml(state.runSearch)}">
         <div id="history-browser">${historyBrowserContent()}</div>
       </aside>
       ${state.isPhone ? "" : `<article class="panel run-details">${selected ? runDetails(selected, { context: "desktop" }) : empty(root ? "Open a folder to see runs." : "Select a run.")}</article>`}
     </section>
+  `;
+}
+
+function historyFolderNav({ root, currentLabel, folderCount }) {
+  if (root) {
+    const runCount = state.snapshot.runs.length;
+    return `
+      <div class="history-folder-nav root">
+        <div>
+          <strong>Folder Library</strong>
+          <small>${folderCount} folder${folderCount === 1 ? "" : "s"} · ${runCount} run${runCount === 1 ? "" : "s"}</small>
+        </div>
+      </div>
+    `;
+  }
+  const runCount = filteredRuns().length;
+  return `
+    <div class="history-folder-nav inside">
+      <button class="folder-back" data-action="open-folder-root" aria-label="Back to folders">
+        <span class="folder-back-icon" aria-hidden="true">←</span>
+        <span><strong>Folders</strong><small>Back to library</small></span>
+      </button>
+      <div class="folder-current">
+        <small>Inside</small>
+        <strong>${escapeHtml(currentLabel)}</strong>
+        <span>${runCount} run${runCount === 1 ? "" : "s"}</span>
+      </div>
+    </div>
   `;
 }
 

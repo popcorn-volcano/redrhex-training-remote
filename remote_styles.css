@@ -407,7 +407,8 @@ video {
   gap: 9px;
 }
 
-.folder-toolbar {
+.folder-toolbar,
+.history-folder-nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -420,6 +421,63 @@ video {
 .folder-toolbar button {
   min-height: 36px;
   padding: 7px 10px;
+}
+
+.history-folder-nav {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-soft);
+  padding: 10px;
+}
+
+.history-folder-nav.root {
+  justify-content: flex-start;
+}
+
+.history-folder-nav strong,
+.history-folder-nav small,
+.history-folder-nav span {
+  display: block;
+}
+
+.history-folder-nav small,
+.folder-current span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.folder-back {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 8px 11px;
+  border-color: var(--accent);
+  background: #fff;
+  color: var(--accent-strong);
+}
+
+.folder-back-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #e3f3f1;
+  color: var(--accent-strong);
+  font-weight: 900;
+}
+
+.folder-current {
+  min-width: 0;
+  text-align: right;
+}
+
+.folder-current strong {
+  max-width: min(280px, 44vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-card-wrap {
@@ -778,6 +836,38 @@ video {
 
   .inline-run-details {
     padding: 13px;
+  }
+
+  .history-folder-nav {
+    align-items: stretch;
+    padding: 11px;
+  }
+
+  .history-folder-nav.inside {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
+  .folder-back {
+    justify-content: flex-start;
+    min-height: 54px;
+    border-radius: 10px;
+  }
+
+  .folder-back-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .folder-current {
+    text-align: left;
+    padding: 2px 4px 0;
+  }
+
+  .folder-current strong {
+    max-width: 100%;
+    font-size: 18px;
   }
 
   .section-head {

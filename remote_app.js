@@ -599,7 +599,10 @@ function historyBrowserContent() {
     return `<div class="folder-list">${summaries.map(folderCard).join("") || empty("No folders yet. Add a folder name to a run from its details.")}</div>`;
   }
   const runs = filteredRuns();
-  return `<div class="run-list">${runs.map(runCardWithOptionalInlineDetails).join("") || empty("No matching runs in this folder.")}</div>`;
+  return `
+    ${folderReturnCard()}
+    <div class="run-list">${runs.map(runCardWithOptionalInlineDetails).join("") || empty("No matching runs in this folder.")}</div>
+  `;
 }
 
 function historyView() {
@@ -656,6 +659,18 @@ function historyFolderNav({ root, currentLabel, folderCount }) {
         <span>${runCount} run${runCount === 1 ? "" : "s"}</span>
       </div>
     </div>
+  `;
+}
+
+function folderReturnCard() {
+  return `
+    <button class="folder-return-card" data-action="open-folder-root">
+      <span class="folder-return-icon" aria-hidden="true">←</span>
+      <span>
+        <strong>Back to Folder Library</strong>
+        <small>Choose another folder</small>
+      </span>
+    </button>
   `;
 }
 

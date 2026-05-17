@@ -43,10 +43,10 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.0.0-run-visibility";
+} from "./core.js?v=3.2.1-terrain-stack";
 
-const CHILD_RELEASE_VERSION = "3.2.0";
-const CHILD_RELEASE_NAME = "Run Visibility Baseline";
+const CHILD_RELEASE_VERSION = "3.2.1";
+const CHILD_RELEASE_NAME = "Terrain Stack";
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
   : { matches: false, addEventListener: null, addListener: null };

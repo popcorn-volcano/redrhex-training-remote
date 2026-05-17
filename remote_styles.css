@@ -1180,12 +1180,17 @@ video {
 }
 
 .terrain-row {
-  grid-template-columns: minmax(0, 1fr) minmax(140px, 220px);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
 }
 
 .terrain-control {
   display: grid;
   gap: 5px;
+  min-width: 0;
+  width: min(260px, 100%);
+  justify-self: end;
 }
 
 .terrain-control small {

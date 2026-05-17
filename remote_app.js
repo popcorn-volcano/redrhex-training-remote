@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.0.1-child-load";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.0.2-child-boot";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,7 +11,7 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.0.1-child-load";
+} from "./api.js?v=3.0.2-child-boot";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -43,7 +43,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.0.1-child-load";
+} from "./core.js?v=3.0.2-child-boot";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -431,12 +431,25 @@ async function loadProfile() {
 }
 
 async function boot() {
-  state.user = await currentUser();
-  if (state.user) {
-    await loadProfile();
-    await refresh();
-  }
   render();
+  try {
+    state.user = await currentUser();
+    if (state.user) {
+      try {
+        await loadProfile();
+      } catch (error) {
+        state.profile = { id: state.user.id, email: state.user.email, role: "viewer" };
+        state.loadError = friendlyErrorMessage(error);
+      }
+      await refresh();
+    }
+  } catch (error) {
+    state.loadError = friendlyErrorMessage(error);
+  } finally {
+    state.loading = false;
+    state.refreshing = false;
+    render();
+  }
 }
 
 function healthChecks() {

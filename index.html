@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RedRHex To Go</title>
-    <link rel="stylesheet" href="./remote_styles.css?v=3.0.1-child-load" />
+    <link rel="stylesheet" href="./remote_styles.css?v=3.0.2-child-boot" />
   </head>
   <body>
     <main id="app" class="remote-shell">
@@ -14,7 +14,26 @@
         <p>Loading the team training workspace.</p>
       </section>
     </main>
-    <script type="module" src="./remote_app.js?v=3.0.1-child-load"></script>
-    <script src="./welcome_refinement.js?v=3.0.1-child-load"></script>
+    <script type="module">
+      import("./remote_app.js?v=3.0.2-child-boot").catch((error) => {
+        console.error("RedRHex child app failed to start", error);
+        const app = document.querySelector("#app");
+        if (!app) return;
+        const panel = document.createElement("section");
+        panel.className = "panel loading-panel";
+        const eyebrow = document.createElement("p");
+        eyebrow.className = "eyebrow";
+        eyebrow.textContent = "BioRoLa ABAD RHex Team";
+        const title = document.createElement("h1");
+        title.textContent = "RedRHex To Go";
+        const message = document.createElement("p");
+        message.textContent = "The child app failed to start. Hard refresh this page, then check the browser console if it still appears.";
+        const detail = document.createElement("pre");
+        detail.textContent = error?.message || String(error);
+        panel.append(eyebrow, title, message, detail);
+        app.replaceChildren(panel);
+      });
+    </script>
+    <script src="./welcome_refinement.js?v=3.0.2-child-boot"></script>
   </body>
 </html>

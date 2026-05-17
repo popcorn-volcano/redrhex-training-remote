@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.6-tensorboard-summary";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.7-snapshot-storage";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,15 +11,15 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.3.6-tensorboard-summary";
-import { createRemoteRealtime } from "./realtime.js?v=3.3.6-tensorboard-summary";
+} from "./api.js?v=3.3.7-snapshot-storage";
+import { createRemoteRealtime } from "./realtime.js?v=3.3.7-snapshot-storage";
 import {
   compareHistoryRuns,
   historyRunsForSnapshot,
   jobClientRequestId,
   normalizeHistorySort,
   realRunConfirmsJob,
-} from "./history_sync.js?v=3.3.6-tensorboard-summary";
+} from "./history_sync.js?v=3.3.7-snapshot-storage";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -57,7 +57,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.3.6-tensorboard-summary";
+} from "./core.js?v=3.3.7-snapshot-storage";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -65,8 +65,8 @@ const PHONE_MEDIA = window.matchMedia
 
 const TEXT_AUTOSAVE_DELAY_MS = 350;
 const THEME_KEY = "redrhex_to_go_theme";
-const CHILD_RELEASE_VERSION = "3.3.6";
-const CHILD_RELEASE_NAME = "TensorBoard Summary";
+const CHILD_RELEASE_VERSION = "3.3.7";
+const CHILD_RELEASE_NAME = "Snapshot Storage";
 const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 const NOTIFICATION_EVENTS = [
   ["notify_training_converged", "Converged", "Reward improvement has flattened."],
@@ -470,7 +470,7 @@ async function ensureSelectedTensorboardSummarySigned() {
   if (!run) return;
   const summary = tensorboardSummaryStateForRun(run, state.snapshot.artifacts);
   const storagePath = summary.artifact?.storage_path;
-  if (!storagePath || summary.url) return;
+  if (!storagePath) return;
   const existing = signedVideoEntry(storagePath);
   if (existing?.url && existing.expiresAt && existing.expiresAt - Date.now() > 5 * 60_000) return;
   try {
@@ -1607,7 +1607,7 @@ function tensorboardSummarySection(run) {
   const summary = tensorboardSummaryStateForRun(run, state.snapshot.artifacts);
   const storagePath = summary.artifact?.storage_path || "";
   const signed = storagePath ? signedVideoEntry(storagePath)?.url || "" : "";
-  const url = summary.url || signed;
+  const url = signed || summary.url;
   return `
     <section id="tensorboard-summary-panel" class="subpanel" data-run-id="${escapeHtml(run.id)}" data-state="${escapeHtml(summary.state)}" data-url="${escapeHtml(url)}" data-storage-path="${escapeHtml(storagePath)}">
       <div class="section-head compact">
@@ -2028,7 +2028,7 @@ function patchTensorboardSummary(run) {
   if (!panel || !run) return;
   const summary = tensorboardSummaryStateForRun(run, state.snapshot.artifacts);
   const storagePath = summary.artifact?.storage_path || "";
-  const nextUrl = summary.url || (storagePath ? signedVideoEntry(storagePath)?.url || "" : "");
+  const nextUrl = (storagePath ? signedVideoEntry(storagePath)?.url || "" : "") || summary.url;
   if (
     (panel.dataset.runId || "") !== String(run.id || "")
     || (panel.dataset.state || "") !== summary.state

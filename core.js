@@ -1,4 +1,4 @@
-import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.6-tensorboard-summary";
+import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.7-snapshot-storage";
 import {
   convergenceLabel as catalogConvergenceLabel,
   jobDisplayStatus as catalogJobDisplayStatus,
@@ -7,7 +7,7 @@ import {
   statusDescription as catalogStatusDescription,
   statusLabel as catalogStatusLabel,
   statusTone as catalogStatusTone,
-} from "./status_catalog.js?v=3.3.6-tensorboard-summary";
+} from "./status_catalog.js?v=3.3.7-snapshot-storage";
 
 export const BUILT_IN_REWARD_PRESETS = [
   {
@@ -531,8 +531,8 @@ export function latestTensorboardSummaryArtifactForRun(run = {}, artifacts = [])
 
 export function tensorboardSummaryStateForRun(run = {}, artifacts = []) {
   const artifact = latestTensorboardSummaryArtifactForRun(run, artifacts);
-  if (artifact?.public_url) return { state: "ready", artifact, url: artifact.public_url };
   if (artifact?.storage_path) return { state: "ready", artifact, url: "" };
+  if (artifact?.public_url) return { state: "ready", artifact, url: artifact.public_url };
   if (run.tensorboard_summary_status === "failed") return { state: "failed", artifact: null, url: "" };
   if (run.has_tensorboard || run.tensorboard_summary_path) return { state: "generating", artifact: null, url: "" };
   return { state: "missing", artifact: null, url: "" };

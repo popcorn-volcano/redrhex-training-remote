@@ -1,9 +1,8 @@
-import { SUPABASE_ANON_KEY, SUPABASE_URL, VIDEO_BUCKET } from "./config.js?v=3.0.2-child-boot";
-import { BUILT_IN_REWARD_PRESETS, BUILT_IN_TERRAIN_PRESETS } from "./core.js?v=3.0.2-child-boot";
+import { SUPABASE_ANON_KEY, SUPABASE_URL, VIDEO_BUCKET } from "./config.js";
+import { BUILT_IN_REWARD_PRESETS, BUILT_IN_TERRAIN_PRESETS } from "./core.js";
 
 const TOKEN_KEY = "redrhex_child_access_token";
 const REFRESH_KEY = "redrhex_child_refresh_token";
-const DEFAULT_FETCH_TIMEOUT_MS = 15000;
 
 export const sessionStore = {
   get accessToken() {
@@ -49,28 +48,11 @@ async function parseResponse(response) {
 }
 
 export async function supabaseFetch(path, options = {}) {
-  const { timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, ...requestOptions } = options;
-  const controller = typeof AbortController !== "undefined" && !requestOptions.signal
-    ? new AbortController()
-    : null;
-  const timeoutId = controller && timeoutMs > 0
-    ? globalThis.setTimeout(() => controller.abort(), timeoutMs)
-    : null;
-  try {
-    const response = await fetch(`${SUPABASE_URL}${path}`, {
-      ...requestOptions,
-      signal: requestOptions.signal || controller?.signal,
-      headers: authHeaders(requestOptions.headers || {}),
-    });
-    return await parseResponse(response);
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error("Supabase request timed out. Check the connection and try refreshing.");
-    }
-    throw error;
-  } finally {
-    if (timeoutId) globalThis.clearTimeout(timeoutId);
-  }
+  const response = await fetch(`${SUPABASE_URL}${path}`, {
+    ...options,
+    headers: authHeaders(options.headers || {}),
+  });
+  return parseResponse(response);
 }
 
 export async function signIn(email, password) {

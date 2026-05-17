@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.0.2-child-boot";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,7 +11,7 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.0.2-child-boot";
+} from "./api.js";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -43,7 +43,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.0.2-child-boot";
+} from "./core.js?v=3.0.0-run-visibility";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -256,8 +256,7 @@ function selectedHistoryRun() {
 
 function setMessage(message, options = {}) {
   state.message = message;
-  const target = app || document.querySelector("#app");
-  if (options.forceRender || !target || !target.querySelector("#message-notice")) {
+  if (options.forceRender || !app.querySelector("#message-notice")) {
     render();
   } else {
     patchShellStatus();
@@ -432,26 +431,12 @@ async function loadProfile() {
 }
 
 async function boot() {
-  try {
-    render();
-    state.user = await currentUser();
-    if (state.user) {
-      try {
-        await loadProfile();
-      } catch (error) {
-        state.profile = { id: state.user.id, email: state.user.email, role: "viewer" };
-        state.loadError = friendlyErrorMessage(error);
-      }
-      await refresh();
-    }
-  } catch (error) {
-    state.loadError = friendlyErrorMessage(error);
-  } finally {
-    state.loading = false;
-    state.refreshing = false;
-    render();
-    document.dispatchEvent(new CustomEvent("redrhex:booted"));
+  state.user = await currentUser();
+  if (state.user) {
+    await loadProfile();
+    await refresh();
   }
+  render();
 }
 
 function healthChecks() {
@@ -559,7 +544,7 @@ function loginPage() {
     <section class="login-grid">
       <article class="panel intro-panel">
         <h2>Team Sign In</h2>
-        <p>Sign in with your RedRHex team account. Contact the lab admin if you don't have credentials yet.</p>
+        <p>This child panel connects to the RedRHex Supabase control plane. It uses the public project URL and publishable key; the private machine token stays only on the training PC.</p>
         <div class="health-row">
           <span>Project</span>
           <strong>${escapeHtml(new URL(SUPABASE_URL).host)}</strong>
@@ -567,9 +552,8 @@ function loginPage() {
       </article>
       <article class="panel">
         <h2>Login</h2>
-        <p id="login-error" class="notice danger" hidden></p>
-        <label>Email <input id="login-email" type="email" autocomplete="email" placeholder="you@example.com"></label>
-        <label>Password <input id="login-password" type="password" autocomplete="current-password" placeholder="your password"></label>
+        <label>Email <input id="login-email" type="email" autocomplete="email"></label>
+        <label>Password <input id="login-password" type="password" autocomplete="current-password"></label>
         <button class="primary wide" data-action="login">Sign In</button>
       </article>
     </section>
@@ -1935,56 +1919,13 @@ function toggleAllGroups(kind) {
 }
 
 async function handleLogin() {
-  const emailEl = document.querySelector("#login-email");
-  const passwordEl = document.querySelector("#login-password");
-  const btn = document.querySelector('[data-action="login"]');
-  const email = emailEl?.value?.trim() || "";
-  const password = passwordEl?.value || "";
-  if (!email || !password) {
-    setLoginError("Please enter your email and password.");
-    return;
-  }
-  // Show loading state so the page doesn't look frozen.
-  if (btn) { btn.disabled = true; btn.textContent = "Signing in…"; }
-  setLoginError("");
-  try {
-    const session = await signIn(email, password);
-    state.user = session?.user || await currentUser();
-    if (!state.user) {
-      throw new Error("Sign in succeeded, but Supabase did not return a user session.");
-    }
-    state.profile = { id: state.user.id, email: state.user.email, role: "viewer" };
-    state.loadError = "";
-    render();
-    try {
-      await loadProfile();
-    } catch (error) {
-      state.loadError = `Signed in, but profile loading failed: ${friendlyErrorMessage(error)}`;
-      render();
-    }
-    await refresh();
-    setMessage("Signed in.");
-  } catch (error) {
-    if (state.user) {
-      state.loadError = friendlyErrorMessage(error);
-      render();
-    } else {
-      setLoginError(friendlyErrorMessage(error));
-    }
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
-  }
-}
-
-function setLoginError(message) {
-  const el = document.querySelector("#login-error");
-  if (el) {
-    el.textContent = message;
-    el.hidden = !message;
-  } else if (message) {
-    // Fallback if the element doesn't exist for some reason.
-    setMessage(message);
-  }
+  const email = document.querySelector("#login-email")?.value || "";
+  const password = document.querySelector("#login-password")?.value || "";
+  await signIn(email, password);
+  state.user = await currentUser();
+  await loadProfile();
+  await refresh();
+  setMessage("Signed in.");
 }
 
 function requesterLabel() {
@@ -2663,12 +2604,7 @@ function openHistoryFolder(folderKey) {
 }
 
 function render() {
-  const target = app || document.querySelector("#app");
-  if (!target) {
-    console.error("RedRHex: #app element not found, cannot render");
-    return;
-  }
-  target.innerHTML = shell();
+  app.innerHTML = shell();
 }
 
 function handlePhoneModeChange(event) {
@@ -2692,7 +2628,7 @@ document.addEventListener("click", async (event) => {
   try {
     if (action === "toggle-theme") return toggleTheme();
     if (action === "view") return setView(target.dataset.view);
-    if (action === "login") { handleLogin(); return; } // handleLogin manages its own try/catch
+    if (action === "login") return await handleLogin();
     if (action === "refresh") return await refresh({ silent: true });
     if (action === "sign-out") {
       await signOut();
@@ -2936,17 +2872,8 @@ document.addEventListener("keydown", (event) => {
 });
 
 boot().catch((error) => {
-  console.error("RedRHex boot failed:", error);
   state.loadError = friendlyErrorMessage(error);
-  try {
-    render();
-  } catch (renderError) {
-    console.error("RedRHex render failed in boot catch:", renderError);
-    const target = document.querySelector("#app");
-    if (target) {
-      target.innerHTML = `<section class="panel loading-panel"><p class="eyebrow">BioRoLa ABAD RHex Team</p><h1>RedRHex To Go</h1><p>App failed to start: ${String(error?.message || error)}</p><p>Hard-refresh the page (Ctrl+Shift+R) to try again.</p></section>`;
-    }
-  }
+  render();
 });
 
 window.addEventListener("focus", () => {

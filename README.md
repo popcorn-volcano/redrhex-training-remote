@@ -2,7 +2,7 @@
 
 GitHub Pages child UI for the RedRHex Training Panel V3.2 remote system.
 
-**Child release:** RedRHex To Go V3.3.1 — History Cleanup
+**Child release:** RedRHex To Go V3.3.2 — History Sync Polish
 
 Open:
 
@@ -19,8 +19,8 @@ This page is static and safe to host publicly. It contains only the Supabase URL
 - Select shared reward presets and send a full reward snapshot with each training job.
 - Create, duplicate, and save shared reward presets as operator/admin.
 - Review synced run history, notes, folders, checkpoints, videos, ONNX state, and related jobs.
-- Sort child history by newest time or by run name.
-- Show only fresh, unconfirmed training requests as gray pending history cards.
+- Sort child history by newest time, oldest time, or run name.
+- Show only fresh, unconfirmed training requests as gray pending history cards, then replace them as soon as the synced mother run appears.
 - Queue safe remote actions: record video, export ONNX, and stop active process.
 - Play private MP4 artifacts through short-lived Supabase signed URLs.
 

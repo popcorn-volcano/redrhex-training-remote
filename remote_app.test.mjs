@@ -5,10 +5,12 @@ import {
   BUILT_IN_REWARD_PRESETS,
   ACTIVE_REFRESH_MS,
   IDLE_REFRESH_MS,
+  PENDING_CONFIRMATION_REFRESH_MS,
   buildRunMetadataPatch,
   buildTrainingJob,
   canOperate,
   hasActiveRemoteWork,
+  hasPendingTrainingConfirmation,
   isMachineFresh,
   jobQueueLabel,
   jobRunId,
@@ -21,6 +23,7 @@ import {
 } from "./core.js";
 import {
   historyRunsForSnapshot,
+  realRunConfirmsJob,
   syntheticRunsFromJobs,
 } from "./history_sync.js";
 
@@ -67,6 +70,17 @@ test("auto refresh interval follows active queue and GPU state", () => {
   assert.equal(refreshDelayForSnapshot({ jobs: [{ status: "queued" }], machine: { gpu_locked: false } }), ACTIVE_REFRESH_MS);
   assert.equal(refreshDelayForSnapshot({ jobs: [], machine: { gpu_locked: true } }), ACTIVE_REFRESH_MS);
   assert.equal(hasActiveRemoteWork({ jobs: [{ status: "completed" }], machine: { gpu_locked: false } }), false);
+});
+
+test("auto refresh briefly speeds up while training waits for mother confirmation", () => {
+  const now = new Date().toISOString();
+  const pending = { id: "job-a", type: "start_training", status: "queued", created_at: now, payload: { display_name: "launch-a" } };
+  assert.equal(hasPendingTrainingConfirmation({ jobs: [pending], runs: [] }), true);
+  assert.equal(refreshDelayForSnapshot({ jobs: [pending], runs: [], machine: { gpu_locked: false } }), PENDING_CONFIRMATION_REFRESH_MS);
+  assert.equal(
+    hasPendingTrainingConfirmation({ jobs: [{ ...pending, result: { local_run_id: "panel-a" } }], runs: [{ id: "panel-a" }] }),
+    false,
+  );
 });
 
 test("job labels explain why a job is waiting", () => {
@@ -133,7 +147,7 @@ test("built-in preset fallback keeps training usable before schema update", () =
   assert.equal(BUILT_IN_REWARD_PRESETS[0].id, "baseline");
 });
 
-test("history sort can switch between time and name", () => {
+test("history sort can switch between newest, oldest, and name", () => {
   const snapshot = {
     runs: [
       { id: "run-b", display_name: "Zeta", created_at: "2026-05-16T00:00:00Z", updated_at: "2026-05-16T00:00:00Z" },
@@ -142,7 +156,9 @@ test("history sort can switch between time and name", () => {
     jobs: [],
     runDeletions: [],
   };
+  assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "newest" }).map((run) => run.id), ["run-b", "run-a"]);
   assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "time" }).map((run) => run.id), ["run-b", "run-a"]);
+  assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "oldest" }).map((run) => run.id), ["run-a", "run-b"]);
   assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "name" }).map((run) => run.id), ["run-a", "run-b"]);
 });
 
@@ -159,4 +175,32 @@ test("history only shows fresh unconfirmed training jobs as pending placeholders
   assert.equal(synthetic[0].job_id, "fresh");
   assert.equal(synthetic[0].pending_confirmation, true);
   assert.equal(synthetic[0].display_name, "New request");
+});
+
+test("pending training placeholder disappears once a matching real run syncs", () => {
+  const nowMs = Date.parse("2026-05-16T00:20:00Z");
+  const job = {
+    id: "fresh",
+    type: "start_training",
+    status: "running",
+    created_at: "2026-05-16T00:15:00Z",
+    payload: {
+      display_name: "Named launch",
+      task: "Template-Redrhex-Direct-v0",
+      num_envs: 4,
+      max_iterations: 8,
+      device: "cuda:0",
+      reward_preset_id: "baseline",
+      terrain_preset_id: "baseline",
+    },
+  };
+  const realRun = {
+    id: "panel_20260516_001505_123456",
+    display_name: "Named launch",
+    created_at: "2026-05-16T00:15:05Z",
+    updated_at: "2026-05-16T00:15:05Z",
+    params: job.payload,
+  };
+  assert.equal(realRunConfirmsJob(job, [realRun]), true);
+  assert.deepEqual(syntheticRunsFromJobs([job], [realRun], [], { nowMs }), []);
 });

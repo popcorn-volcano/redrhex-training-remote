@@ -1,4 +1,4 @@
-import { jobDisplayStatus } from "./status_catalog.js?v=3.3.1-history-cleanup";
+import { jobDisplayStatus } from "./status_catalog.js?v=3.3.2-history-sync-polish";
 
 export const PENDING_SYNTHETIC_JOB_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -80,9 +80,19 @@ function nameValue(run = {}) {
   return clean(run.display_name || run.id || run.job_id).toLowerCase();
 }
 
-export function compareHistoryRuns(a = {}, b = {}, sortBy = "time") {
-  if (sortBy === "name") {
+export function normalizeHistorySort(sortBy = "newest") {
+  const value = clean(sortBy).toLowerCase();
+  if (value === "name" || value === "oldest") return value;
+  return "newest";
+}
+
+export function compareHistoryRuns(a = {}, b = {}, sortBy = "newest") {
+  const mode = normalizeHistorySort(sortBy);
+  if (mode === "name") {
     return nameValue(a).localeCompare(nameValue(b)) || timeValue(b) - timeValue(a);
+  }
+  if (mode === "oldest") {
+    return timeValue(a) - timeValue(b) || nameValue(a).localeCompare(nameValue(b));
   }
   return timeValue(b) - timeValue(a) || nameValue(a).localeCompare(nameValue(b));
 }
@@ -94,17 +104,62 @@ export function isFreshPendingJob(job = {}, nowMs = Date.now(), maxAgeMs = PENDI
   return Number.isFinite(timestamp) && timestamp >= nowMs - maxAgeMs;
 }
 
+function jobTimeValue(job = {}) {
+  const parsed = Date.parse(job.created_at || job.updated_at || "");
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function paramValue(source = {}, key) {
+  const params = source?.params && typeof source.params === "object" ? source.params : source;
+  return clean(params?.[key]).toLowerCase();
+}
+
+function sameOptionalParam(jobPayload = {}, run = {}, key) {
+  const jobValue = paramValue(jobPayload, key);
+  const runValue = paramValue(run, key);
+  return !jobValue || !runValue || jobValue === runValue;
+}
+
+function sameOptionalNumber(jobPayload = {}, run = {}, key) {
+  const jobValue = Number(jobPayload?.[key]);
+  const runValue = Number((run?.params && typeof run.params === "object" ? run.params : run)?.[key]);
+  return !Number.isFinite(jobValue) || !Number.isFinite(runValue) || jobValue === runValue;
+}
+
+export function realRunConfirmsJob(job = {}, realRuns = []) {
+  const payload = job.payload && typeof job.payload === "object" ? job.payload : {};
+  const linkedRunId = jobRunId(job);
+  if (linkedRunId && (realRuns || []).some((run) => clean(run.id) === linkedRunId)) {
+    return true;
+  }
+
+  const jobCreated = jobTimeValue(job);
+  const jobName = clean(payload.display_name).toLowerCase();
+  return (realRuns || []).some((run) => {
+    const runCreated = timeValue(run);
+    if (jobCreated && runCreated && runCreated < jobCreated - 60_000) return false;
+
+    const runName = clean(run.display_name).toLowerCase();
+    if (jobName && runName && jobName === runName) return true;
+
+    const closeInTime = jobCreated && runCreated && runCreated >= jobCreated - 60_000 && runCreated <= jobCreated + 10 * 60 * 1000;
+    if (!closeInTime) return false;
+    return sameOptionalParam(payload, run, "task")
+      && sameOptionalParam(payload, run, "device")
+      && sameOptionalParam(payload, run, "reward_preset_id")
+      && sameOptionalParam(payload, run, "terrain_preset_id")
+      && sameOptionalNumber(payload, run, "num_envs")
+      && sameOptionalNumber(payload, run, "max_iterations");
+  });
+}
+
 export function syntheticRunsFromJobs(jobs = [], realRuns = [], runDeletions = [], options = {}) {
   const deletions = normalizeRunDeletions(runDeletions);
-  const realIds = new Set((realRuns || []).map((run) => clean(run.id)).filter(Boolean));
   const nowMs = options.nowMs ?? Date.now();
   const maxAgeMs = options.maxAgeMs ?? PENDING_SYNTHETIC_JOB_MAX_AGE_MS;
   return (jobs || [])
     .filter((job) => job.type === "start_training")
-    .filter((job) => {
-      const linkedRunId = jobRunId(job);
-      return !linkedRunId || !realIds.has(linkedRunId);
-    })
+    .filter((job) => !realRunConfirmsJob(job, realRuns))
     .filter((job) => isFreshPendingJob(job, nowMs, maxAgeMs))
     .map((job) => {
       const payload = job.payload && typeof job.payload === "object" ? job.payload : {};
@@ -133,5 +188,5 @@ export function historyRunsForSnapshot(snapshot = {}, options = {}) {
   const runDeletions = snapshot.runDeletions || [];
   const realRuns = filterDeletedRuns(snapshot.runs || [], runDeletions);
   return [...syntheticRunsFromJobs(snapshot.jobs || [], realRuns, runDeletions, options), ...realRuns]
-    .sort((a, b) => compareHistoryRuns(a, b, options.sortBy || "time"));
+    .sort((a, b) => compareHistoryRuns(a, b, options.sortBy || "newest"));
 }

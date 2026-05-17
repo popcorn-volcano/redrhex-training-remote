@@ -1,4 +1,4 @@
-import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.1-history-cleanup";
+import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.2-history-sync-polish";
 import {
   convergenceLabel as catalogConvergenceLabel,
   jobDisplayStatus as catalogJobDisplayStatus,
@@ -7,7 +7,7 @@ import {
   statusDescription as catalogStatusDescription,
   statusLabel as catalogStatusLabel,
   statusTone as catalogStatusTone,
-} from "./status_catalog.js?v=3.3.1-history-cleanup";
+} from "./status_catalog.js?v=3.3.2-history-sync-polish";
 
 export const BUILT_IN_REWARD_PRESETS = [
   {
@@ -313,6 +313,8 @@ export const TERRAIN_FIELDS = [
 
 export const ACTIVE_JOB_STATUSES = new Set(["queued", "claimed", "running"]);
 export const GPU_JOB_TYPES = new Set(["start_training", "record_video", "export_onnx"]);
+export const PENDING_CONFIRMATION_REFRESH_MS = 1_500;
+export const PENDING_CONFIRMATION_MAX_AGE_MS = 30 * 60 * 1000;
 export const ACTIVE_REFRESH_MS = 3_000;
 export const IDLE_REFRESH_MS = 5_000;
 
@@ -391,7 +393,22 @@ export function hasActiveRemoteWork(snapshot = {}) {
   return Boolean(machine?.gpu_locked) || jobs.some((job) => ACTIVE_JOB_STATUSES.has(String(job.status || "").toLowerCase()));
 }
 
+export function hasPendingTrainingConfirmation(snapshot = {}, nowMs = Date.now()) {
+  const jobs = Array.isArray(snapshot.jobs) ? snapshot.jobs : [];
+  const runs = Array.isArray(snapshot.runs) ? snapshot.runs : [];
+  const realRunIds = new Set(runs.map((run) => String(run?.id || "").trim()).filter(Boolean));
+  return jobs.some((job) => {
+    if (String(job?.type || "") !== "start_training") return false;
+    if (!ACTIVE_JOB_STATUSES.has(String(job?.status || "").toLowerCase())) return false;
+    const timestamp = Date.parse(job?.updated_at || job?.created_at || "");
+    if (!Number.isFinite(timestamp) || timestamp < nowMs - PENDING_CONFIRMATION_MAX_AGE_MS) return false;
+    const linkedRunId = jobRunId(job).trim();
+    return !linkedRunId || !realRunIds.has(linkedRunId);
+  });
+}
+
 export function refreshDelayForSnapshot(snapshot = {}) {
+  if (hasPendingTrainingConfirmation(snapshot)) return PENDING_CONFIRMATION_REFRESH_MS;
   return hasActiveRemoteWork(snapshot) ? ACTIVE_REFRESH_MS : IDLE_REFRESH_MS;
 }
 

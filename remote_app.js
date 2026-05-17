@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.1-history-cleanup";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.2-history-sync-polish";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,9 +11,9 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.3.1-history-cleanup";
-import { createRemoteRealtime } from "./realtime.js?v=3.3.1-history-cleanup";
-import { compareHistoryRuns, historyRunsForSnapshot } from "./history_sync.js?v=3.3.1-history-cleanup";
+} from "./api.js?v=3.3.2-history-sync-polish";
+import { createRemoteRealtime } from "./realtime.js?v=3.3.2-history-sync-polish";
+import { compareHistoryRuns, historyRunsForSnapshot, normalizeHistorySort } from "./history_sync.js?v=3.3.2-history-sync-polish";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -50,7 +50,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.3.1-history-cleanup";
+} from "./core.js?v=3.3.2-history-sync-polish";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -58,8 +58,8 @@ const PHONE_MEDIA = window.matchMedia
 
 const TEXT_AUTOSAVE_DELAY_MS = 350;
 const THEME_KEY = "redrhex_to_go_theme";
-const CHILD_RELEASE_VERSION = "3.3.1";
-const CHILD_RELEASE_NAME = "History Cleanup";
+const CHILD_RELEASE_VERSION = "3.3.2";
+const CHILD_RELEASE_NAME = "History Sync Polish";
 const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 const NOTIFICATION_EVENTS = [
   ["notify_training_converged", "Converged", "Reward improvement has flattened."],
@@ -72,6 +72,10 @@ function initialView() {
   const stored = localStorage.getItem("redrhex_child_view");
   if (stored === "dashboard") return "train";
   return VIEW_IDS.includes(stored) ? stored : "train";
+}
+
+function initialHistorySort() {
+  return normalizeHistorySort(localStorage.getItem("redrhex_child_history_sort"));
 }
 
 function preferredTheme() {
@@ -115,7 +119,7 @@ const state = {
   selectedRunId: "",
   runSearch: "",
   folderFilter: "all",
-  historySort: localStorage.getItem("redrhex_child_history_sort") === "name" ? "name" : "time",
+  historySort: initialHistorySort(),
   signedVideos: {},
   videoCheckpointByRun: {},
   runDrafts: {},
@@ -1061,13 +1065,14 @@ function folderSummaries() {
   return summaries
     .map((folder) => ({
       ...folder,
-      latest: folder.runs.slice().sort((a, b) => compareHistoryRuns(a, b, "time"))[0],
+      latest: folder.runs.slice().sort((a, b) => compareHistoryRuns(a, b, "newest"))[0],
+      sortRun: folder.runs.slice().sort((a, b) => compareHistoryRuns(a, b, state.historySort))[0],
       matches: !q || folder.label.toLowerCase().includes(q) || folder.runs.some(runMatchesSearch),
     }))
     .filter((folder) => folder.matches)
     .sort((a, b) => {
       if (state.historySort === "name") return a.label.localeCompare(b.label);
-      return compareHistoryRuns(a.latest, b.latest, "time") || a.label.localeCompare(b.label);
+      return compareHistoryRuns(a.sortRun, b.sortRun, state.historySort) || a.label.localeCompare(b.label);
     });
 }
 
@@ -1124,7 +1129,8 @@ function historyLayout() {
           <input id="run-search" placeholder="${root ? "Search folders and runs" : "Search this folder"}" value="${escapeHtml(state.runSearch)}">
           <label>Sort
             <select id="history-sort">
-              <option value="time" ${state.historySort === "time" ? "selected" : ""}>Time</option>
+              <option value="newest" ${state.historySort === "newest" ? "selected" : ""}>Newest first</option>
+              <option value="oldest" ${state.historySort === "oldest" ? "selected" : ""}>Oldest first</option>
               <option value="name" ${state.historySort === "name" ? "selected" : ""}>Name</option>
             </select>
           </label>
@@ -2941,7 +2947,7 @@ document.addEventListener("change", (event) => {
     renderRunListOnly();
   }
   if (event.target.id === "history-sort") {
-    state.historySort = event.target.value === "name" ? "name" : "time";
+    state.historySort = normalizeHistorySort(event.target.value);
     localStorage.setItem("redrhex_child_history_sort", state.historySort);
     renderRunListOnly();
   }

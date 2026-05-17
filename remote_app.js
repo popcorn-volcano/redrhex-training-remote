@@ -43,10 +43,10 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.2.1-terrain-stack";
+} from "./core.js?v=3.2.2-rewards-match";
 
-const CHILD_RELEASE_VERSION = "3.2.1";
-const CHILD_RELEASE_NAME = "Terrain Stack";
+const CHILD_RELEASE_VERSION = "3.2.2";
+const CHILD_RELEASE_NAME = "Rewards Match";
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
   : { matches: false, addEventListener: null, addListener: null };
@@ -926,7 +926,7 @@ function terrainInputRow(field, preset, editable) {
       <span>
         <strong>${escapeHtml(field.label)}</strong>
         <small>${escapeHtml(field.help || "")}</small>
-        <code>${escapeHtml(field.key)}</code>
+        <code title="${escapeHtml(field.key)}">${escapeHtml(field.key)}</code>
       </span>
       <span class="terrain-control">
         ${terrainInput(field, value, editable)}

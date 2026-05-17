@@ -256,7 +256,8 @@ function selectedHistoryRun() {
 
 function setMessage(message, options = {}) {
   state.message = message;
-  if (options.forceRender || !app.querySelector("#message-notice")) {
+  const target = app || document.querySelector("#app");
+  if (options.forceRender || !target || !target.querySelector("#message-notice")) {
     render();
   } else {
     patchShellStatus();
@@ -558,7 +559,7 @@ function loginPage() {
     <section class="login-grid">
       <article class="panel intro-panel">
         <h2>Team Sign In</h2>
-        <p>This child panel connects to the RedRHex Supabase control plane. It uses the public project URL and publishable key; the private machine token stays only on the training PC.</p>
+        <p>Sign in with your RedRHex team account. Contact the lab admin if you don't have credentials yet.</p>
         <div class="health-row">
           <span>Project</span>
           <strong>${escapeHtml(new URL(SUPABASE_URL).host)}</strong>
@@ -566,8 +567,9 @@ function loginPage() {
       </article>
       <article class="panel">
         <h2>Login</h2>
-        <label>Email <input id="login-email" type="email" autocomplete="email"></label>
-        <label>Password <input id="login-password" type="password" autocomplete="current-password"></label>
+        <p id="login-error" class="notice danger" hidden></p>
+        <label>Email <input id="login-email" type="email" autocomplete="email" placeholder="you@example.com"></label>
+        <label>Password <input id="login-password" type="password" autocomplete="current-password" placeholder="your password"></label>
         <button class="primary wide" data-action="login">Sign In</button>
       </article>
     </section>
@@ -1933,13 +1935,40 @@ function toggleAllGroups(kind) {
 }
 
 async function handleLogin() {
-  const email = document.querySelector("#login-email")?.value || "";
-  const password = document.querySelector("#login-password")?.value || "";
-  await signIn(email, password);
-  state.user = await currentUser();
-  await loadProfile();
-  await refresh();
-  setMessage("Signed in.");
+  const emailEl = document.querySelector("#login-email");
+  const passwordEl = document.querySelector("#login-password");
+  const btn = document.querySelector('[data-action="login"]');
+  const email = emailEl?.value?.trim() || "";
+  const password = passwordEl?.value || "";
+  if (!email || !password) {
+    setLoginError("Please enter your email and password.");
+    return;
+  }
+  // Show loading state so the page doesn't look frozen.
+  if (btn) { btn.disabled = true; btn.textContent = "Signing in…"; }
+  setLoginError("");
+  try {
+    await signIn(email, password);
+    state.user = await currentUser();
+    await loadProfile();
+    await refresh();
+    setMessage("Signed in.");
+  } catch (error) {
+    setLoginError(friendlyErrorMessage(error));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
+  }
+}
+
+function setLoginError(message) {
+  const el = document.querySelector("#login-error");
+  if (el) {
+    el.textContent = message;
+    el.hidden = !message;
+  } else if (message) {
+    // Fallback if the element doesn't exist for some reason.
+    setMessage(message);
+  }
 }
 
 function requesterLabel() {
@@ -2647,7 +2676,7 @@ document.addEventListener("click", async (event) => {
   try {
     if (action === "toggle-theme") return toggleTheme();
     if (action === "view") return setView(target.dataset.view);
-    if (action === "login") return await handleLogin();
+    if (action === "login") { handleLogin(); return; } // handleLogin manages its own try/catch
     if (action === "refresh") return await refresh({ silent: true });
     if (action === "sign-out") {
       await signOut();

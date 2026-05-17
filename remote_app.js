@@ -465,6 +465,24 @@ async function ensureSelectedVideoSigned() {
   }
 }
 
+async function ensureSelectedTensorboardSummarySigned() {
+  const run = selectedRun();
+  if (!run) return;
+  const summary = tensorboardSummaryStateForRun(run, state.snapshot.artifacts);
+  const storagePath = summary.artifact?.storage_path;
+  if (!storagePath || summary.url) return;
+  const existing = signedVideoEntry(storagePath);
+  if (existing?.url && existing.expiresAt && existing.expiresAt - Date.now() > 5 * 60_000) return;
+  try {
+    state.signedVideos[storagePath] = {
+      url: await createSignedVideoUrl(storagePath),
+      expiresAt: Date.now() + 55 * 60_000,
+    };
+  } catch (error) {
+    state.message = friendlyErrorMessage(error);
+  }
+}
+
 async function refresh(options = {}) {
   if (!state.user) return;
   if (state.refreshing) return;
@@ -502,6 +520,7 @@ async function refresh(options = {}) {
     }
     state.lastUpdated = new Date().toISOString();
     await ensureSelectedVideoSigned();
+    await ensureSelectedTensorboardSummarySigned();
   } catch (error) {
     state.loadError = friendlyErrorMessage(error);
   } finally {
@@ -1586,9 +1605,11 @@ function teamVideoSection(run) {
 
 function tensorboardSummarySection(run) {
   const summary = tensorboardSummaryStateForRun(run, state.snapshot.artifacts);
-  const url = summary.url || "";
+  const storagePath = summary.artifact?.storage_path || "";
+  const signed = storagePath ? signedVideoEntry(storagePath)?.url || "" : "";
+  const url = summary.url || signed;
   return `
-    <section id="tensorboard-summary-panel" class="subpanel" data-run-id="${escapeHtml(run.id)}" data-state="${escapeHtml(summary.state)}" data-url="${escapeHtml(url)}">
+    <section id="tensorboard-summary-panel" class="subpanel" data-run-id="${escapeHtml(run.id)}" data-state="${escapeHtml(summary.state)}" data-url="${escapeHtml(url)}" data-storage-path="${escapeHtml(storagePath)}">
       <div class="section-head compact">
         <h3>TensorBoard Snapshot</h3>
         <span class="badge ${statusTone(summary.state)}">${escapeHtml(summary.state)}</span>
@@ -1597,6 +1618,10 @@ function tensorboardSummarySection(run) {
         <a class="tensorboard-summary-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">
           <img class="tensorboard-summary-image" src="${escapeHtml(url)}" alt="TensorBoard scalar summary for ${escapeHtml(run.display_name || run.id)}">
         </a>
+        ${storagePath ? `<div class="button-row"><button data-action="load-summary" data-path="${escapeHtml(storagePath)}">Refresh Snapshot Link</button></div>` : ""}
+      ` : summary.state === "ready" && storagePath ? `
+        <p class="muted">Preparing a signed team-only TensorBoard snapshot link...</p>
+        <button data-action="load-summary" data-path="${escapeHtml(storagePath)}">Load Snapshot</button>
       ` : summary.state === "generating" ? `
         <p class="muted">Mother has TensorBoard scalars for this run. The snapshot image will appear after the next sync.</p>
       ` : summary.state === "failed" ? `
@@ -2002,11 +2027,13 @@ function patchTensorboardSummary(run) {
   const panel = document.querySelector("#tensorboard-summary-panel");
   if (!panel || !run) return;
   const summary = tensorboardSummaryStateForRun(run, state.snapshot.artifacts);
-  const nextUrl = summary.url || "";
+  const storagePath = summary.artifact?.storage_path || "";
+  const nextUrl = summary.url || (storagePath ? signedVideoEntry(storagePath)?.url || "" : "");
   if (
     (panel.dataset.runId || "") !== String(run.id || "")
     || (panel.dataset.state || "") !== summary.state
     || (panel.dataset.url || "") !== nextUrl
+    || (panel.dataset.storagePath || "") !== storagePath
   ) {
     panel.outerHTML = tensorboardSummarySection(run);
   }
@@ -2913,18 +2940,22 @@ async function sendMissedNotifications() {
   }
 }
 
-async function loadVideo(storagePath) {
+async function loadArtifactLink(storagePath) {
   state.signedVideos[storagePath] = {
     url: await createSignedVideoUrl(storagePath),
     expiresAt: Date.now() + 55 * 60_000,
   };
   const run = selectedRun();
   if (state.view === "history" && run) {
-    const panel = document.querySelector("#team-video-panel");
-    if (panel) panel.outerHTML = teamVideoSection(run);
+    patchTeamVideo(run);
+    patchTensorboardSummary(run);
   } else {
     render();
   }
+}
+
+async function loadVideo(storagePath) {
+  return loadArtifactLink(storagePath);
 }
 
 function openHistoryFolder(folderKey) {
@@ -3025,6 +3056,7 @@ document.addEventListener("click", async (event) => {
         if (state.isPhone && syncHistoryAccordion(target)) {
           if (opened) {
             await ensureSelectedVideoSigned();
+            await ensureSelectedTensorboardSummarySigned();
             patchSelectedRunDetails();
           }
         } else {
@@ -3033,6 +3065,7 @@ document.addEventListener("click", async (event) => {
             setRunMetadataSaveStatus("saved");
           }
           await ensureSelectedVideoSigned();
+          await ensureSelectedTensorboardSummarySigned();
           patchHistory({ forceList: true });
         }
         patchShellStatus();
@@ -3040,10 +3073,12 @@ document.addEventListener("click", async (event) => {
       }
       state.selectedRunId = target.dataset.id;
       await ensureSelectedVideoSigned();
+      await ensureSelectedTensorboardSummarySigned();
       return render();
     }
     if (action === "save-run") return await saveRun(target.dataset.runId || state.selectedRunId);
     if (action === "load-video") return await loadVideo(target.dataset.path);
+    if (action === "load-summary") return await loadArtifactLink(target.dataset.path);
     if (action === "copy-video-path") {
       await navigator.clipboard.writeText(target.dataset.path || "");
       return setMessage("Video storage path copied.");

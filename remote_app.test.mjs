@@ -196,6 +196,7 @@ test("tensorboard summary artifacts must belong to the selected run and log dire
   };
   assert.equal(latestTensorboardSummaryArtifactForRun(run, [leakedSummary, ownSummary]), ownSummary);
   assert.equal(tensorboardSummaryStateForRun(run, [leakedSummary, ownSummary]).url, ownSummary.public_url);
+  assert.equal(tensorboardSummaryStateForRun(run, [{ ...ownSummary, public_url: "", storage_path: "runs/run-a/tensorboard/tensorboard_summary.png" }]).state, "ready");
   assert.equal(tensorboardSummaryStateForRun({ id: "run-a", has_tensorboard: true }, []).state, "generating");
 });
 

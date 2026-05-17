@@ -431,8 +431,8 @@ async function loadProfile() {
 }
 
 async function boot() {
-  render();
   try {
+    render();
     state.user = await currentUser();
     if (state.user) {
       try {
@@ -449,6 +449,7 @@ async function boot() {
     state.loading = false;
     state.refreshing = false;
     render();
+    document.dispatchEvent(new CustomEvent("redrhex:booted"));
   }
 }
 
@@ -2617,7 +2618,12 @@ function openHistoryFolder(folderKey) {
 }
 
 function render() {
-  app.innerHTML = shell();
+  const target = app || document.querySelector("#app");
+  if (!target) {
+    console.error("RedRHex: #app element not found, cannot render");
+    return;
+  }
+  target.innerHTML = shell();
 }
 
 function handlePhoneModeChange(event) {
@@ -2885,8 +2891,17 @@ document.addEventListener("keydown", (event) => {
 });
 
 boot().catch((error) => {
+  console.error("RedRHex boot failed:", error);
   state.loadError = friendlyErrorMessage(error);
-  render();
+  try {
+    render();
+  } catch (renderError) {
+    console.error("RedRHex render failed in boot catch:", renderError);
+    const target = document.querySelector("#app");
+    if (target) {
+      target.innerHTML = `<section class="panel loading-panel"><p class="eyebrow">BioRoLa ABAD RHex Team</p><h1>RedRHex To Go</h1><p>App failed to start: ${String(error?.message || error)}</p><p>Hard-refresh the page (Ctrl+Shift+R) to try again.</p></section>`;
+    }
+  }
 });
 
 window.addEventListener("focus", () => {

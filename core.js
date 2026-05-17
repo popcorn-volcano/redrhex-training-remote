@@ -1,4 +1,4 @@
-import { HEARTBEAT_STALE_MS } from "./config.js";
+import { HEARTBEAT_STALE_MS } from "./config.js?v=3.0.2-child-boot";
 
 export const BUILT_IN_REWARD_PRESETS = [
   {

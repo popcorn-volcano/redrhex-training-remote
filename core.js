@@ -1,10 +1,4 @@
-import { HEARTBEAT_STALE_MS } from "./config.js?v=3.2.3-history-pulse";
-import {
-  jobDisplayStatus as catalogJobDisplayStatus,
-  statusDescriptor as catalogStatusDescriptor,
-  statusLabel as catalogStatusLabel,
-  statusTone as catalogStatusTone,
-} from "./status_catalog.js?v=3.2.3-history-pulse";
+import { HEARTBEAT_STALE_MS } from "./config.js";
 
 export const BUILT_IN_REWARD_PRESETS = [
   {
@@ -357,29 +351,10 @@ export function machineState(machine, now = Date.now()) {
 
 export function statusTone(status) {
   const normalized = String(status || "").toLowerCase();
-  if (["ready", "busy", "paused", "offline", "missing"].includes(normalized)) {
-    return catalogStatusTone("machine", normalized);
-  }
-  if (["recordable", "uploading"].includes(normalized)) {
-    return catalogStatusTone("artifact", normalized);
-  }
-  if (["claimed", "launched"].includes(normalized)) {
-    return catalogStatusTone("job", normalized);
-  }
-  if (["online", "accepting", "success"].includes(normalized)) return "good";
-  return catalogStatusTone("run", normalized);
-}
-
-export function statusDescriptor(kind, status, context = {}) {
-  return catalogStatusDescriptor(kind, status, context);
-}
-
-export function statusLabel(kind, status, context = {}) {
-  return catalogStatusLabel(kind, status, context);
-}
-
-export function jobDisplayStatus(job = {}) {
-  return catalogJobDisplayStatus(job);
+  if (["completed", "ready", "online", "accepting", "success"].includes(normalized)) return "good";
+  if (["running", "claimed", "queued", "busy", "launched"].includes(normalized)) return "info";
+  if (["failed", "cancelled", "offline", "missing"].includes(normalized)) return "bad";
+  return "muted";
 }
 
 export function hasActiveRemoteWork(snapshot = {}) {
@@ -405,8 +380,8 @@ export function jobQueueLabel(job = {}, machine = null) {
   if (status === "claimed") return "claimed by worker";
   if (status === "running") return "running";
   if (status === "failed") return job.error || "failed";
-  if (status === "completed" && type === "start_training") return statusLabel("job", "launched");
-  if (status === "completed") return statusLabel("job", "completed");
+  if (status === "completed" && type === "start_training") return "launched";
+  if (status === "completed") return "completed";
   return status || "unknown";
 }
 

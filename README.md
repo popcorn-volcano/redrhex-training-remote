@@ -2,7 +2,7 @@
 
 GitHub Pages child UI for the RedRHex Training Panel V3.2 remote system.
 
-**Child release:** RedRHex To Go V3.2.3 — History Pulse
+**Child release:** RedRHex To Go V3.2.0 — Run Visibility Baseline
 
 Open:
 
@@ -16,12 +16,9 @@ This page is static and safe to host publicly. It contains only the Supabase URL
 
 - Check Supabase login, role, machine heartbeat, worker acceptance, GPU lock, and video storage readiness.
 - Queue training jobs with task/env/iteration/device settings.
-- Name runs before queueing so mother and child history match the experiment intent.
 - Select shared reward presets and send a full reward snapshot with each training job.
 - Create, duplicate, and save shared reward presets as operator/admin.
 - Review synced run history, notes, folders, checkpoints, videos, ONNX state, and related jobs.
-- Refresh history through Supabase Realtime with adaptive polling fallback and visible sync diagnostics.
-- Hide deleted mother runs through `run_deletions` tombstones so old completed jobs do not visually recreate removed history.
 - Queue safe remote actions: record video, export ONNX, and stop active process.
 - Play private MP4 artifacts through short-lived Supabase signed URLs.
 
@@ -31,13 +28,13 @@ Mother-only features remain in the local panel: terminal/process console, tmux a
 
 Push this repository to `main`. GitHub Pages deploys the static files from the repository root through the Pages workflow.
 
-Before using the History Pulse sync features, apply the latest mother schema:
+Before using the new Rewards/Video features, apply the latest mother schema:
 
 ```text
 tools/training_panel/supabase/schema.sql
 ```
 
-If the page says a table such as `public.run_deletions` or `public.reward_presets` is missing from the schema cache, the Supabase project has not loaded the latest schema yet. Re-run the full schema SQL in Supabase SQL Editor. If you just created the table and still see the message, run this in SQL Editor once to refresh PostgREST:
+If the page says `Could not find the table 'public.reward_presets' in the schema cache`, the Supabase project has not loaded the latest schema yet. Re-run the full schema SQL in Supabase SQL Editor. If you just created the table and still see the message, run this in SQL Editor once to refresh PostgREST:
 
 ```sql
 notify pgrst, 'reload schema';

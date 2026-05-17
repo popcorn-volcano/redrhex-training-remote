@@ -432,6 +432,12 @@ video {
   color: var(--info);
 }
 
+.release-badge {
+  border-color: rgba(31, 122, 140, 0.28);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
 .badge.bad,
 .health-card.warn strong,
 .check-list .warn span {

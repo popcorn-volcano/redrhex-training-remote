@@ -45,6 +45,8 @@ import {
   videoStateForRun,
 } from "./core.js?v=3.0.0-run-visibility";
 
+const CHILD_RELEASE_VERSION = "3.2.0";
+const CHILD_RELEASE_NAME = "Run Visibility Baseline";
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
   : { matches: false, addEventListener: null, addListener: null };
@@ -474,6 +476,7 @@ function shell() {
         <p class="subcopy">Team training, reward tuning, history, and shared results from anywhere.</p>
       </div>
       <div class="top-status">
+        <span id="child-release-badge" class="badge release-badge">To Go V${escapeHtml(CHILD_RELEASE_VERSION)} · ${escapeHtml(CHILD_RELEASE_NAME)}</span>
         <span id="machine-state-badge" class="badge ${tone}">${escapeHtml(machineState(machine))}</span>
         <span id="role-badge" class="badge">${escapeHtml(role())}</span>
         <span id="last-updated-badge" class="badge">${state.lastUpdated ? `Updated ${escapeHtml(formatRelativeTime(state.lastUpdated))}` : "Not updated yet"}</span>

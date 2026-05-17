@@ -1,6 +1,8 @@
 # RedRHex To Go
 
-GitHub Pages child UI for the RedRHex Training Panel V2.1 remote system.
+GitHub Pages child UI for the RedRHex Training Panel V3.2 remote system.
+
+**Child release:** RedRHex To Go V3.2.0 — Run Visibility Baseline
 
 Open:
 

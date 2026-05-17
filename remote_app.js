@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.7-snapshot-storage";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.4-first-release";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,15 +11,15 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.3.7-snapshot-storage";
-import { createRemoteRealtime } from "./realtime.js?v=3.3.7-snapshot-storage";
+} from "./api.js?v=3.4-first-release";
+import { createRemoteRealtime } from "./realtime.js?v=3.4-first-release";
 import {
   compareHistoryRuns,
   historyRunsForSnapshot,
   jobClientRequestId,
   normalizeHistorySort,
   realRunConfirmsJob,
-} from "./history_sync.js?v=3.3.7-snapshot-storage";
+} from "./history_sync.js?v=3.4-first-release";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -57,7 +57,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.3.7-snapshot-storage";
+} from "./core.js?v=3.4-first-release";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -65,8 +65,8 @@ const PHONE_MEDIA = window.matchMedia
 
 const TEXT_AUTOSAVE_DELAY_MS = 350;
 const THEME_KEY = "redrhex_to_go_theme";
-const CHILD_RELEASE_VERSION = "3.3.7";
-const CHILD_RELEASE_NAME = "Snapshot Storage";
+const CHILD_RELEASE_VERSION = "3.4";
+const CHILD_RELEASE_NAME = "First Release";
 const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 const NOTIFICATION_EVENTS = [
   ["notify_training_converged", "Converged", "Reward improvement has flattened."],

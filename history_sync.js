@@ -1,4 +1,4 @@
-import { jobDisplayStatus } from "./status_catalog.js?v=3.3.7-snapshot-storage";
+import { jobDisplayStatus } from "./status_catalog.js?v=3.4-first-release";
 
 export const PENDING_SYNTHETIC_JOB_MAX_AGE_MS = 30 * 60 * 1000;
 

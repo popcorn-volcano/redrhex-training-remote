@@ -1,4 +1,4 @@
-import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.7-snapshot-storage";
+import { HEARTBEAT_STALE_MS } from "./config.js?v=3.4-first-release";
 import {
   convergenceLabel as catalogConvergenceLabel,
   jobDisplayStatus as catalogJobDisplayStatus,
@@ -7,7 +7,7 @@ import {
   statusDescription as catalogStatusDescription,
   statusLabel as catalogStatusLabel,
   statusTone as catalogStatusTone,
-} from "./status_catalog.js?v=3.3.7-snapshot-storage";
+} from "./status_catalog.js?v=3.4-first-release";
 
 export const BUILT_IN_REWARD_PRESETS = [
   {

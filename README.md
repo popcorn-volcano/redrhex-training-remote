@@ -1,8 +1,10 @@
 # RedRHex To Go
 
-GitHub Pages child UI for the RedRHex Training Panel V3.2 remote system.
+GitHub Pages child UI for the RedRHex Training Panel V3.4 remote system.
 
-**Child release:** RedRHex To Go V3.3.7 — Snapshot Storage
+**Child release:** RedRHex To Go V3.4 — First Release
+
+中文使用手冊：[MANUAL_ZH.md](MANUAL_ZH.md)
 
 Open:
 

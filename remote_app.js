@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.0.1-child-load";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,7 +11,7 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js";
+} from "./api.js?v=3.0.1-child-load";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -43,7 +43,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.0.0-run-visibility";
+} from "./core.js?v=3.0.1-child-load";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")

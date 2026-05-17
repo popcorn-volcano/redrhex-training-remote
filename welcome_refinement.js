@@ -16,13 +16,15 @@
     });
   }
 
-  const observer = new MutationObserver(refineWelcomeActions);
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["class"],
-  });
+  if (typeof MutationObserver !== "undefined") {
+    const observer = new MutationObserver(refineWelcomeActions);
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
 
   document.addEventListener("click", (event) => {
     if (event.target.closest('[data-action="view"]')) {

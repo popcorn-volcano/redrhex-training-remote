@@ -1,4 +1,4 @@
-import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.2-history-sync-polish";
+import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.3-queue-fast-claim";
 import {
   convergenceLabel as catalogConvergenceLabel,
   jobDisplayStatus as catalogJobDisplayStatus,
@@ -7,7 +7,7 @@ import {
   statusDescription as catalogStatusDescription,
   statusLabel as catalogStatusLabel,
   statusTone as catalogStatusTone,
-} from "./status_catalog.js?v=3.3.2-history-sync-polish";
+} from "./status_catalog.js?v=3.3.3-queue-fast-claim";
 
 export const BUILT_IN_REWARD_PRESETS = [
   {
@@ -590,9 +590,10 @@ export function formatRelativeTime(iso, now = Date.now()) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function buildTrainingJob({ machineId, params, preset, terrainPreset, role, userId, requesterLabel = "" }) {
+export function buildTrainingJob({ machineId, params, preset, terrainPreset, role, userId, requesterLabel = "", clientRequestId = "" }) {
   const rewardValues = preset?.values && typeof preset.values === "object" ? preset.values : {};
   const terrainValues = terrainPreset?.values && typeof terrainPreset.values === "object" ? terrainPreset.values : {};
+  const requestId = String(clientRequestId || params?.client_request_id || "").trim();
   return {
     machine_id: machineId || null,
     type: "start_training",
@@ -607,6 +608,7 @@ export function buildTrainingJob({ machineId, params, preset, terrainPreset, rol
       terrain_overrides: terrainValues,
       requester_id: userId || null,
       requester_label: requesterLabel || "",
+      client_request_id: requestId || null,
     },
   };
 }

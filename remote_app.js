@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.2-history-sync-polish";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.3-queue-fast-claim";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,9 +11,15 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.3.2-history-sync-polish";
-import { createRemoteRealtime } from "./realtime.js?v=3.3.2-history-sync-polish";
-import { compareHistoryRuns, historyRunsForSnapshot, normalizeHistorySort } from "./history_sync.js?v=3.3.2-history-sync-polish";
+} from "./api.js?v=3.3.3-queue-fast-claim";
+import { createRemoteRealtime } from "./realtime.js?v=3.3.3-queue-fast-claim";
+import {
+  compareHistoryRuns,
+  historyRunsForSnapshot,
+  jobClientRequestId,
+  normalizeHistorySort,
+  realRunConfirmsJob,
+} from "./history_sync.js?v=3.3.3-queue-fast-claim";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -50,7 +56,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.3.2-history-sync-polish";
+} from "./core.js?v=3.3.3-queue-fast-claim";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -58,8 +64,8 @@ const PHONE_MEDIA = window.matchMedia
 
 const TEXT_AUTOSAVE_DELAY_MS = 350;
 const THEME_KEY = "redrhex_to_go_theme";
-const CHILD_RELEASE_VERSION = "3.3.2";
-const CHILD_RELEASE_NAME = "History Sync Polish";
+const CHILD_RELEASE_VERSION = "3.3.3";
+const CHILD_RELEASE_NAME = "Queue Fast Claim";
 const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 const NOTIFICATION_EVENTS = [
   ["notify_training_converged", "Converged", "Reward improvement has flattened."],
@@ -115,6 +121,7 @@ const state = {
     device: "cuda:0",
     seed: "",
     display_name: "",
+    folder: "",
   },
   selectedRunId: "",
   runSearch: "",
@@ -140,6 +147,8 @@ const state = {
   notificationMissedResult: null,
   missedNotificationMode: "future_only",
   lastQueuedJobId: "",
+  localPendingTrainingJobs: [],
+  trainQueueNotice: null,
   realtime: null,
   realtimeMachineId: "",
   realtimeDiagnostics: { enabled: false, status: "off", error: "", lastEventAt: "", lastTable: "" },
@@ -220,8 +229,8 @@ function selectedTerrainPresetForTraining() {
   return preset;
 }
 
-function historyRunsForView(sortBy = "time") {
-  return historyRunsForSnapshot(state.snapshot, { sortBy });
+function historyRunsForView(sortBy = "newest") {
+  return historyRunsForSnapshot(state.snapshot, { sortBy, localPendingTrainingJobs: state.localPendingTrainingJobs });
 }
 
 function historyRunsForBrowser() {
@@ -253,6 +262,32 @@ function setMessage(message, options = {}) {
   }
 }
 
+function noticeToneClass(tone = "info") {
+  if (tone === "danger" || tone === "warning" || tone === "queue-success") return tone;
+  return "";
+}
+
+function trainQueueNoticeHtml() {
+  const notice = state.trainQueueNotice;
+  const message = notice?.message || "";
+  return `<div id="train-queue-notice" class="notice ${noticeToneClass(notice?.tone)}" ${message ? "" : "hidden"}>${escapeHtml(message)}</div>`;
+}
+
+function patchTrainQueueNotice() {
+  const slot = document.querySelector("#train-queue-notice");
+  if (!slot) return;
+  const notice = state.trainQueueNotice;
+  const message = notice?.message || "";
+  slot.textContent = message;
+  slot.hidden = !message;
+  slot.className = `notice ${noticeToneClass(notice?.tone)}`.trim();
+}
+
+function setTrainQueueNotice(message, tone = "info") {
+  state.trainQueueNotice = message ? { message, tone } : null;
+  patchTrainQueueNotice();
+}
+
 function setTheme(theme) {
   state.theme = theme === "dark" ? "dark" : "light";
   localStorage.setItem(THEME_KEY, state.theme);
@@ -275,10 +310,17 @@ function setView(view) {
   render();
 }
 
+function snapshotWithLocalPendingJobs() {
+  return {
+    ...state.snapshot,
+    jobs: [...state.localPendingTrainingJobs, ...(state.snapshot.jobs || [])],
+  };
+}
+
 function scheduleRefresh() {
   if (state.refreshTimer) clearTimeout(state.refreshTimer);
   if (!state.user || document.hidden) return;
-  const delay = refreshDelayForSnapshot(state.snapshot);
+  const delay = refreshDelayForSnapshot(snapshotWithLocalPendingJobs());
   state.refreshTimer = setTimeout(() => {
     refresh({ silent: true }).catch((error) => {
       state.loadError = friendlyErrorMessage(error);
@@ -289,7 +331,7 @@ function scheduleRefresh() {
 }
 
 function refreshModeText() {
-  const delaySeconds = Math.round(refreshDelayForSnapshot(state.snapshot) / 1000);
+  const delaySeconds = Math.round(refreshDelayForSnapshot(snapshotWithLocalPendingJobs()) / 1000);
   const realtime = state.realtimeDiagnostics || {};
   if (realtime.enabled) return `Realtime + ${delaySeconds}s fallback`;
   if (realtime.status && !["off", "fallback"].includes(realtime.status)) {
@@ -436,6 +478,7 @@ async function refresh(options = {}) {
     state.snapshot = await loadRemoteSnapshot(state.machineId, state.user?.id || "");
     state.snapshot.presets = state.snapshot.presets.map(normalizePreset);
     state.snapshot.terrainPresets = (state.snapshot.terrainPresets || []).map(normalizeTerrainPreset);
+    pruneLocalPendingTrainingJobs();
     const freshNotificationSettings = normalizeNotificationSettings(state.snapshot.notificationSettings);
     state.notificationSettings = freshNotificationSettings;
     if (!state.notificationSettingsDraft || !["dirty", "saving"].includes(state.notificationSaveStatus)) {
@@ -774,7 +817,13 @@ function trainView() {
         <p class="muted">Queues a job for mother. The worker will run one Isaac/GPU action at a time.</p>
         <label>Machine ID <input id="machine-id" value="${escapeHtml(state.machineId)}"></label>
         <label>Task <input id="task" value="${escapeHtml(form.task)}"></label>
-        <label>Run Name <input id="run-display-name" maxlength="120" placeholder="optional" value="${escapeHtml(form.display_name || "")}"></label>
+        <div class="input-row">
+          <label>Run Name <input id="run-display-name" maxlength="120" placeholder="optional" value="${escapeHtml(form.display_name || "")}"></label>
+          <label>Folder <input id="run-folder-before-launch" maxlength="120" list="run-folder-suggestions" placeholder="Uncategorized" value="${escapeHtml(form.folder || "")}"></label>
+        </div>
+        <datalist id="run-folder-suggestions">
+          ${folders().map((folder) => `<option value="${escapeHtml(folder)}"></option>`).join("")}
+        </datalist>
         <div class="input-row">
           <label>Envs <input id="num-envs" type="number" min="1" max="8192" value="${escapeHtml(form.num_envs)}"></label>
           <label>Iterations <input id="max-iterations" type="number" min="1" max="100000" value="${escapeHtml(form.max_iterations)}"></label>
@@ -795,6 +844,7 @@ function trainView() {
           <button class="primary" data-action="queue-training" ${disabled ? "disabled" : ""}>Queue Training</button>
           <button data-action="tweak-last-run" ${disabled ? "disabled" : ""}>Tweak From Last Run</button>
         </div>
+        ${trainQueueNoticeHtml()}
         ${disabled ? `<p class="muted">Viewer accounts can inspect but cannot launch training.</p>` : ""}
       </article>
       <article class="panel">
@@ -2105,6 +2155,49 @@ function requesterLabel() {
   return state.profile?.display_name || state.profile?.email || state.user?.email || "Remote member";
 }
 
+function createClientRequestId() {
+  if (globalThis.crypto?.randomUUID) return `child-${globalThis.crypto.randomUUID()}`;
+  return `child-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function pruneLocalPendingTrainingJobs() {
+  if (!state.localPendingTrainingJobs.length) return;
+  const remoteClientRequestIds = new Set((state.snapshot.jobs || []).map(jobClientRequestId).filter(Boolean));
+  const realRuns = state.snapshot.runs || [];
+  state.localPendingTrainingJobs = state.localPendingTrainingJobs.filter((job) => {
+    const clientRequestId = jobClientRequestId(job);
+    return !(clientRequestId && remoteClientRequestIds.has(clientRequestId)) && !realRunConfirmsJob(job, realRuns);
+  });
+}
+
+function addLocalPendingTrainingJob(job, clientRequestId) {
+  const now = new Date().toISOString();
+  const pending = {
+    ...job,
+    id: `local:${clientRequestId}`,
+    status: "queued",
+    created_at: now,
+    updated_at: now,
+    result: {},
+    error: "",
+    local_pending: true,
+  };
+  state.localPendingTrainingJobs = [
+    pending,
+    ...state.localPendingTrainingJobs.filter((item) => jobClientRequestId(item) !== clientRequestId),
+  ].slice(0, 20);
+  renderRunListOnly();
+  patchShellStatus();
+  return pending;
+}
+
+function removeLocalPendingTrainingJob(clientRequestId) {
+  if (!clientRequestId) return;
+  state.localPendingTrainingJobs = state.localPendingTrainingJobs.filter((job) => jobClientRequestId(job) !== clientRequestId);
+  renderRunListOnly();
+  patchShellStatus();
+}
+
 function rememberQueuedJob(job, rows = []) {
   const inserted = Array.isArray(rows) && rows[0]
     ? rows[0]
@@ -2119,6 +2212,7 @@ function rememberQueuedJob(job, rows = []) {
   state.lastQueuedJobId = inserted.id || "";
   const existing = state.snapshot.jobs || [];
   state.snapshot.jobs = [inserted, ...existing.filter((item) => item.id !== inserted.id)].slice(0, 60);
+  pruneLocalPendingTrainingJobs();
   return inserted;
 }
 
@@ -2128,6 +2222,7 @@ async function queueTraining() {
   state.trainForm = {
     task: document.querySelector("#task")?.value || "Template-Redrhex-Direct-v0",
     display_name: String(document.querySelector("#run-display-name")?.value || "").trim(),
+    folder: String(document.querySelector("#run-folder-before-launch")?.value || "").trim(),
     num_envs: Number(document.querySelector("#num-envs")?.value || 4),
     max_iterations: Number(document.querySelector("#max-iterations")?.value || 8),
     device: document.querySelector("#device")?.value || "cuda:0",
@@ -2152,11 +2247,14 @@ async function queueTraining() {
     device: state.trainForm.device,
   };
   if (state.trainForm.display_name) params.display_name = state.trainForm.display_name;
+  if (state.trainForm.folder) params.folder = state.trainForm.folder;
   if (state.trainForm.seed !== "") params.seed = Number(state.trainForm.seed);
   if (preset.draft) {
     params.tweak_source_run_id = preset.source_run_id || "";
     params.tweak_source_label = preset.source_label || preset.source_run_id || "";
   }
+  const clientRequestId = createClientRequestId();
+  params.client_request_id = clientRequestId;
   const job = buildTrainingJob({
     machineId: state.machineId,
     params,
@@ -2165,14 +2263,24 @@ async function queueTraining() {
     role: role(),
     userId: state.user?.id,
     requesterLabel: requesterLabel(),
+    clientRequestId,
   });
-  const rows = await insert("jobs", job);
-  rememberQueuedJob(job, rows);
-  await refresh({ silent: true });
-  state.trainForm.display_name = "";
-  const runNameInput = document.querySelector("#run-display-name");
-  if (runNameInput) runNameInput.value = "";
-  setMessage(`Queued training with ${preset.name} and ${terrainPreset.name}. It will stay gray in History until mother confirms the run.`);
+  addLocalPendingTrainingJob(job, clientRequestId);
+  setTrainQueueNotice("Sending training request to mother...", "info");
+  try {
+    const rows = await insert("jobs", job);
+    rememberQueuedJob(job, rows);
+    state.trainForm.display_name = "";
+    const runNameInput = document.querySelector("#run-display-name");
+    if (runNameInput) runNameInput.value = "";
+    setTrainQueueNotice(`Queued training with ${preset.name} and ${terrainPreset.name}. It will stay gray in History until mother confirms the run.`, "queue-success");
+    refresh({ silent: true, reason: "queue-training" }).catch((error) => {
+      setTrainQueueNotice(friendlyErrorMessage(error), "warning");
+    });
+  } catch (error) {
+    removeLocalPendingTrainingJob(clientRequestId);
+    setTrainQueueNotice(friendlyErrorMessage(error), "danger");
+  }
 }
 
 function applyTweakPayload(payload) {
@@ -2184,6 +2292,7 @@ function applyTweakPayload(payload) {
     device: params.device || "cuda:0",
     seed: params.seed ?? "",
     display_name: "",
+    folder: params.folder || "",
   };
   state.tweakDraftPreset = normalizePreset({
     ...payload.reward_preset,
@@ -2904,10 +3013,11 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("change", (event) => {
-  if (["task", "run-display-name", "num-envs", "max-iterations", "device", "seed"].includes(event.target.id)) {
+  if (["task", "run-display-name", "run-folder-before-launch", "num-envs", "max-iterations", "device", "seed"].includes(event.target.id)) {
     state.trainForm = {
       task: document.querySelector("#task")?.value || "Template-Redrhex-Direct-v0",
       display_name: String(document.querySelector("#run-display-name")?.value || "").trim(),
+      folder: String(document.querySelector("#run-folder-before-launch")?.value || "").trim(),
       num_envs: Number(document.querySelector("#num-envs")?.value || 4),
       max_iterations: Number(document.querySelector("#max-iterations")?.value || 8),
       device: document.querySelector("#device")?.value || "cuda:0",
@@ -2969,6 +3079,9 @@ document.addEventListener("change", (event) => {
 document.addEventListener("input", (event) => {
   if (event.target.id === "run-display-name") {
     state.trainForm.display_name = String(event.target.value || "").trim();
+  }
+  if (event.target.id === "run-folder-before-launch") {
+    state.trainForm.folder = String(event.target.value || "").trim();
   }
   if (event.target.id === "run-search") {
     state.runSearch = event.target.value;

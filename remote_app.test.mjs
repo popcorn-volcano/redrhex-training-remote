@@ -23,6 +23,7 @@ import {
 } from "./core.js";
 import {
   historyRunsForSnapshot,
+  jobClientRequestId,
   realRunConfirmsJob,
   syntheticRunsFromJobs,
 } from "./history_sync.js";
@@ -47,10 +48,14 @@ test("training job includes reward snapshot", () => {
     role: "operator",
     userId: "user-one",
     requesterLabel: "phone user",
-    params: { task: "T", num_envs: 4, max_iterations: 8, device: "cuda:0" },
+    clientRequestId: "child-123",
+    params: { task: "T", num_envs: 4, max_iterations: 8, device: "cuda:0", display_name: "Launch A", folder: "tests" },
     preset: { id: "speed", values: { rew_scale_forward_vel: 5 } },
   });
   assert.equal(job.type, "start_training");
+  assert.equal(job.payload.display_name, "Launch A");
+  assert.equal(job.payload.folder, "tests");
+  assert.equal(jobClientRequestId(job), "child-123");
   assert.equal(job.payload.reward_preset_id, "speed");
   assert.deepEqual(job.payload.reward_overrides, { rew_scale_forward_vel: 5 });
   assert.equal(job.payload.requester_id, "user-one");
@@ -177,6 +182,42 @@ test("history only shows fresh unconfirmed training jobs as pending placeholders
   assert.equal(synthetic[0].display_name, "New request");
 });
 
+test("local optimistic pending training jobs appear before Supabase refresh", () => {
+  const nowMs = Date.parse("2026-05-16T00:20:00Z");
+  const localPending = [{
+    id: "local:child-123",
+    type: "start_training",
+    status: "queued",
+    created_at: "2026-05-16T00:20:00Z",
+    payload: { client_request_id: "child-123", display_name: "Launch A", folder: "tests" },
+  }];
+  const runs = historyRunsForSnapshot({ runs: [], jobs: [], runDeletions: [] }, { localPendingTrainingJobs: localPending, nowMs });
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].id, "job:local:child-123");
+  assert.equal(runs[0].folder, "tests");
+  assert.equal(runs[0].pending_confirmation, true);
+});
+
+test("remote queued job replaces local optimistic pending job", () => {
+  const nowMs = Date.parse("2026-05-16T00:20:00Z");
+  const localPending = {
+    id: "local:child-123",
+    type: "start_training",
+    status: "queued",
+    created_at: "2026-05-16T00:20:00Z",
+    payload: { client_request_id: "child-123", display_name: "Launch A" },
+  };
+  const remoteJob = {
+    id: "remote-job",
+    type: "start_training",
+    status: "queued",
+    created_at: "2026-05-16T00:20:01Z",
+    payload: { client_request_id: "child-123", display_name: "Launch A" },
+  };
+  const runs = historyRunsForSnapshot({ runs: [], jobs: [remoteJob], runDeletions: [] }, { localPendingTrainingJobs: [localPending], nowMs });
+  assert.deepEqual(runs.map((run) => run.id), ["job:remote-job"]);
+});
+
 test("pending training placeholder disappears once a matching real run syncs", () => {
   const nowMs = Date.parse("2026-05-16T00:20:00Z");
   const job = {
@@ -192,6 +233,7 @@ test("pending training placeholder disappears once a matching real run syncs", (
       device: "cuda:0",
       reward_preset_id: "baseline",
       terrain_preset_id: "baseline",
+      client_request_id: "child-123",
     },
   };
   const realRun = {
@@ -203,4 +245,24 @@ test("pending training placeholder disappears once a matching real run syncs", (
   };
   assert.equal(realRunConfirmsJob(job, [realRun]), true);
   assert.deepEqual(syntheticRunsFromJobs([job], [realRun], [], { nowMs }), []);
+});
+
+test("blank pending training is not hidden by an older run with matching params", () => {
+  const nowMs = Date.parse("2026-05-16T00:20:00Z");
+  const payload = { task: "Template-Redrhex-Direct-v0", num_envs: 4, max_iterations: 8, device: "cuda:0" };
+  const job = {
+    id: "fresh-blank",
+    type: "start_training",
+    status: "queued",
+    created_at: "2026-05-16T00:20:00Z",
+    payload,
+  };
+  const olderRun = {
+    id: "old-run",
+    created_at: "2026-05-16T00:00:00Z",
+    updated_at: "2026-05-16T00:00:00Z",
+    params: payload,
+  };
+  assert.equal(realRunConfirmsJob(job, [olderRun]), false);
+  assert.equal(syntheticRunsFromJobs([job], [olderRun], [], { nowMs }).length, 1);
 });

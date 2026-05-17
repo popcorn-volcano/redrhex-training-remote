@@ -1,4 +1,4 @@
-import { jobDisplayStatus } from "./status_catalog.js?v=3.3.2-history-sync-polish";
+import { jobDisplayStatus } from "./status_catalog.js?v=3.3.3-queue-fast-claim";
 
 export const PENDING_SYNTHETIC_JOB_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -109,25 +109,31 @@ function jobTimeValue(job = {}) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function paramValue(source = {}, key) {
-  const params = source?.params && typeof source.params === "object" ? source.params : source;
-  return clean(params?.[key]).toLowerCase();
+function clientRequestIdFromPayload(payload = {}) {
+  return clean(payload.client_request_id || payload.clientRequestId || "");
 }
 
-function sameOptionalParam(jobPayload = {}, run = {}, key) {
-  const jobValue = paramValue(jobPayload, key);
-  const runValue = paramValue(run, key);
-  return !jobValue || !runValue || jobValue === runValue;
+export function jobClientRequestId(job = {}) {
+  const payload = job.payload && typeof job.payload === "object" ? job.payload : {};
+  const result = job.result && typeof job.result === "object" ? job.result : {};
+  const resultPayload = result.payload && typeof result.payload === "object" ? result.payload : {};
+  return clientRequestIdFromPayload(payload)
+    || clientRequestIdFromPayload(result)
+    || clientRequestIdFromPayload(resultPayload);
 }
 
-function sameOptionalNumber(jobPayload = {}, run = {}, key) {
-  const jobValue = Number(jobPayload?.[key]);
-  const runValue = Number((run?.params && typeof run.params === "object" ? run.params : run)?.[key]);
-  return !Number.isFinite(jobValue) || !Number.isFinite(runValue) || jobValue === runValue;
+export function runClientRequestId(run = {}) {
+  const params = run.params && typeof run.params === "object" ? run.params : {};
+  return clientRequestIdFromPayload(run) || clientRequestIdFromPayload(params);
 }
 
 export function realRunConfirmsJob(job = {}, realRuns = []) {
   const payload = job.payload && typeof job.payload === "object" ? job.payload : {};
+  const clientRequestId = jobClientRequestId(job);
+  if (clientRequestId && (realRuns || []).some((run) => runClientRequestId(run) === clientRequestId)) {
+    return true;
+  }
+
   const linkedRunId = jobRunId(job);
   if (linkedRunId && (realRuns || []).some((run) => clean(run.id) === linkedRunId)) {
     return true;
@@ -141,16 +147,24 @@ export function realRunConfirmsJob(job = {}, realRuns = []) {
 
     const runName = clean(run.display_name).toLowerCase();
     if (jobName && runName && jobName === runName) return true;
-
-    const closeInTime = jobCreated && runCreated && runCreated >= jobCreated - 60_000 && runCreated <= jobCreated + 10 * 60 * 1000;
-    if (!closeInTime) return false;
-    return sameOptionalParam(payload, run, "task")
-      && sameOptionalParam(payload, run, "device")
-      && sameOptionalParam(payload, run, "reward_preset_id")
-      && sameOptionalParam(payload, run, "terrain_preset_id")
-      && sameOptionalNumber(payload, run, "num_envs")
-      && sameOptionalNumber(payload, run, "max_iterations");
+    return false;
   });
+}
+
+function mergedJobs(remoteJobs = [], localPendingJobs = []) {
+  const remoteKeys = new Set();
+  for (const job of remoteJobs || []) {
+    const id = clean(job?.id);
+    const clientRequestId = jobClientRequestId(job);
+    if (id) remoteKeys.add(`id:${id}`);
+    if (clientRequestId) remoteKeys.add(`client:${clientRequestId}`);
+  }
+  const locals = (localPendingJobs || []).filter((job) => {
+    const id = clean(job?.id);
+    const clientRequestId = jobClientRequestId(job);
+    return !(id && remoteKeys.has(`id:${id}`)) && !(clientRequestId && remoteKeys.has(`client:${clientRequestId}`));
+  });
+  return [...locals, ...(remoteJobs || [])];
 }
 
 export function syntheticRunsFromJobs(jobs = [], realRuns = [], runDeletions = [], options = {}) {
@@ -176,7 +190,7 @@ export function syntheticRunsFromJobs(jobs = [], realRuns = [], runDeletions = [
         display_name: payload.display_name || "Pending training",
         created_at: job.created_at,
         updated_at: job.updated_at || job.created_at,
-        folder: "",
+        folder: payload.folder || "",
         params: payload,
         created_by: job.actor_id || payload.requester_id || null,
       };
@@ -187,6 +201,7 @@ export function syntheticRunsFromJobs(jobs = [], realRuns = [], runDeletions = [
 export function historyRunsForSnapshot(snapshot = {}, options = {}) {
   const runDeletions = snapshot.runDeletions || [];
   const realRuns = filterDeletedRuns(snapshot.runs || [], runDeletions);
-  return [...syntheticRunsFromJobs(snapshot.jobs || [], realRuns, runDeletions, options), ...realRuns]
+  const jobs = mergedJobs(snapshot.jobs || [], options.localPendingTrainingJobs || snapshot.localPendingTrainingJobs || []);
+  return [...syntheticRunsFromJobs(jobs, realRuns, runDeletions, options), ...realRuns]
     .sort((a, b) => compareHistoryRuns(a, b, options.sortBy || "newest"));
 }

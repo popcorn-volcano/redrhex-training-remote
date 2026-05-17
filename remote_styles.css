@@ -698,6 +698,26 @@ video {
   font-size: 12px;
 }
 
+.history-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+
+.history-tools label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.history-tools select {
+  min-height: 39px;
+}
+
 .folder-back {
   display: flex;
   align-items: center;
@@ -788,6 +808,19 @@ video {
 .preset-button.active {
   border-color: var(--accent);
   background: #eef8f8;
+}
+
+.run-card.pending-confirmation {
+  border-style: dashed;
+  color: var(--muted);
+  background: var(--panel-soft);
+  opacity: 0.78;
+}
+
+.run-card.pending-confirmation.active {
+  border-color: var(--muted);
+  background: var(--disabled-bg);
+  opacity: 0.92;
 }
 
 .preset-button.draft-preset {

@@ -19,6 +19,10 @@ import {
   slugify,
   videoStateForRun,
 } from "./core.js";
+import {
+  historyRunsForSnapshot,
+  syntheticRunsFromJobs,
+} from "./history_sync.js";
 
 test("role helpers keep viewers read-only", () => {
   assert.equal(canOperate("viewer"), false);
@@ -127,4 +131,32 @@ test("slugify returns stable storage-safe ids", () => {
 test("built-in preset fallback keeps training usable before schema update", () => {
   assert.equal(BUILT_IN_REWARD_PRESETS.length >= 3, true);
   assert.equal(BUILT_IN_REWARD_PRESETS[0].id, "baseline");
+});
+
+test("history sort can switch between time and name", () => {
+  const snapshot = {
+    runs: [
+      { id: "run-b", display_name: "Zeta", created_at: "2026-05-16T00:00:00Z", updated_at: "2026-05-16T00:00:00Z" },
+      { id: "run-a", display_name: "Alpha", created_at: "2026-05-15T00:00:00Z", updated_at: "2026-05-15T00:00:00Z" },
+    ],
+    jobs: [],
+    runDeletions: [],
+  };
+  assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "time" }).map((run) => run.id), ["run-b", "run-a"]);
+  assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "name" }).map((run) => run.id), ["run-a", "run-b"]);
+});
+
+test("history only shows fresh unconfirmed training jobs as pending placeholders", () => {
+  const nowMs = Date.parse("2026-05-16T00:20:00Z");
+  const jobs = [
+    { id: "fresh", type: "start_training", status: "queued", created_at: "2026-05-16T00:15:00Z", payload: { display_name: "New request" } },
+    { id: "old", type: "start_training", status: "queued", created_at: "2026-05-15T23:00:00Z", payload: { display_name: "Old request" } },
+    { id: "done", type: "start_training", status: "completed", created_at: "2026-05-16T00:10:00Z", result: { local_run_id: "panel_run" }, payload: {} },
+    { id: "failed", type: "start_training", status: "failed", created_at: "2026-05-16T00:18:00Z", payload: {} },
+  ];
+  const synthetic = syntheticRunsFromJobs(jobs, [], [], { nowMs });
+  assert.equal(synthetic.length, 1);
+  assert.equal(synthetic[0].job_id, "fresh");
+  assert.equal(synthetic[0].pending_confirmation, true);
+  assert.equal(synthetic[0].display_name, "New request");
 });

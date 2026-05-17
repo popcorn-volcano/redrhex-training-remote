@@ -1,4 +1,6 @@
-import { jobDisplayStatus } from "./status_catalog.js?v=3.3.0-history-sync";
+import { jobDisplayStatus } from "./status_catalog.js?v=3.3.1-history-cleanup";
+
+export const PENDING_SYNTHETIC_JOB_MAX_AGE_MS = 30 * 60 * 1000;
 
 function clean(value) {
   return String(value || "").trim();
@@ -69,16 +71,41 @@ export function filterDeletedRuns(runs = [], runDeletions = []) {
   return (runs || []).filter((run) => !isDeletedRunLike(run, deletions));
 }
 
-export function syntheticRunsFromJobs(jobs = [], realRuns = [], runDeletions = []) {
+function timeValue(run = {}) {
+  const parsed = Date.parse(run.updated_at || run.created_at || "");
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function nameValue(run = {}) {
+  return clean(run.display_name || run.id || run.job_id).toLowerCase();
+}
+
+export function compareHistoryRuns(a = {}, b = {}, sortBy = "time") {
+  if (sortBy === "name") {
+    return nameValue(a).localeCompare(nameValue(b)) || timeValue(b) - timeValue(a);
+  }
+  return timeValue(b) - timeValue(a) || nameValue(a).localeCompare(nameValue(b));
+}
+
+export function isFreshPendingJob(job = {}, nowMs = Date.now(), maxAgeMs = PENDING_SYNTHETIC_JOB_MAX_AGE_MS) {
+  const status = clean(job.status).toLowerCase();
+  if (!["queued", "claimed", "running"].includes(status)) return false;
+  const timestamp = Date.parse(job.updated_at || job.created_at || "");
+  return Number.isFinite(timestamp) && timestamp >= nowMs - maxAgeMs;
+}
+
+export function syntheticRunsFromJobs(jobs = [], realRuns = [], runDeletions = [], options = {}) {
   const deletions = normalizeRunDeletions(runDeletions);
   const realIds = new Set((realRuns || []).map((run) => clean(run.id)).filter(Boolean));
+  const nowMs = options.nowMs ?? Date.now();
+  const maxAgeMs = options.maxAgeMs ?? PENDING_SYNTHETIC_JOB_MAX_AGE_MS;
   return (jobs || [])
     .filter((job) => job.type === "start_training")
     .filter((job) => {
       const linkedRunId = jobRunId(job);
       return !linkedRunId || !realIds.has(linkedRunId);
     })
-    .filter((job) => ["queued", "claimed", "running", "completed", "failed"].includes(clean(job.status).toLowerCase()))
+    .filter((job) => isFreshPendingJob(job, nowMs, maxAgeMs))
     .map((job) => {
       const payload = job.payload && typeof job.payload === "object" ? job.payload : {};
       const linkedRunId = jobRunId(job);
@@ -90,7 +117,8 @@ export function syntheticRunsFromJobs(jobs = [], realRuns = [], runDeletions = [
         linked_run_id: linkedRunId,
         source: "remote_job",
         status,
-        display_name: payload.display_name || (status === "launched" ? "Training launched" : "Queued training"),
+        pending_confirmation: true,
+        display_name: payload.display_name || "Pending training",
         created_at: job.created_at,
         updated_at: job.updated_at || job.created_at,
         folder: "",
@@ -101,9 +129,9 @@ export function syntheticRunsFromJobs(jobs = [], realRuns = [], runDeletions = [
     .filter((run) => !isDeletedRunLike(run, deletions));
 }
 
-export function historyRunsForSnapshot(snapshot = {}) {
+export function historyRunsForSnapshot(snapshot = {}, options = {}) {
   const runDeletions = snapshot.runDeletions || [];
   const realRuns = filterDeletedRuns(snapshot.runs || [], runDeletions);
-  return [...syntheticRunsFromJobs(snapshot.jobs || [], realRuns, runDeletions), ...realRuns]
-    .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")));
+  return [...syntheticRunsFromJobs(snapshot.jobs || [], realRuns, runDeletions, options), ...realRuns]
+    .sort((a, b) => compareHistoryRuns(a, b, options.sortBy || "time"));
 }

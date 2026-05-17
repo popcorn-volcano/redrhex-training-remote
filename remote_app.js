@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.0-history-sync";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.1-history-cleanup";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,9 +11,9 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.3.0-history-sync";
-import { createRemoteRealtime } from "./realtime.js?v=3.3.0-history-sync";
-import { historyRunsForSnapshot } from "./history_sync.js?v=3.3.0-history-sync";
+} from "./api.js?v=3.3.1-history-cleanup";
+import { createRemoteRealtime } from "./realtime.js?v=3.3.1-history-cleanup";
+import { compareHistoryRuns, historyRunsForSnapshot } from "./history_sync.js?v=3.3.1-history-cleanup";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -50,7 +50,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.3.0-history-sync";
+} from "./core.js?v=3.3.1-history-cleanup";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -58,8 +58,8 @@ const PHONE_MEDIA = window.matchMedia
 
 const TEXT_AUTOSAVE_DELAY_MS = 350;
 const THEME_KEY = "redrhex_to_go_theme";
-const CHILD_RELEASE_VERSION = "3.2.3";
-const CHILD_RELEASE_NAME = "History Pulse";
+const CHILD_RELEASE_VERSION = "3.3.1";
+const CHILD_RELEASE_NAME = "History Cleanup";
 const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 const NOTIFICATION_EVENTS = [
   ["notify_training_converged", "Converged", "Reward improvement has flattened."],
@@ -115,6 +115,7 @@ const state = {
   selectedRunId: "",
   runSearch: "",
   folderFilter: "all",
+  historySort: localStorage.getItem("redrhex_child_history_sort") === "name" ? "name" : "time",
   signedVideos: {},
   videoCheckpointByRun: {},
   runDrafts: {},
@@ -215,8 +216,12 @@ function selectedTerrainPresetForTraining() {
   return preset;
 }
 
-function historyRunsForView() {
-  return historyRunsForSnapshot(state.snapshot);
+function historyRunsForView(sortBy = "time") {
+  return historyRunsForSnapshot(state.snapshot, { sortBy });
+}
+
+function historyRunsForBrowser() {
+  return historyRunsForView(state.historySort);
 }
 
 function selectedRun({ fallback = true } = {}) {
@@ -1011,7 +1016,7 @@ function terrainInput(field, value, editable) {
 
 function filteredRuns() {
   const q = state.runSearch.trim().toLowerCase();
-  return historyRunsForView().filter((run) => {
+  return historyRunsForBrowser().filter((run) => {
     const folder = run.folder || "";
     if (state.folderFilter === "uncategorized" && folder) return false;
     if (state.folderFilter !== "all" && state.folderFilter !== "uncategorized" && folder !== state.folderFilter) return false;
@@ -1027,7 +1032,7 @@ function runMatchesSearch(run) {
 }
 
 function folders() {
-  const set = new Set(historyRunsForView().map((run) => run.folder).filter(Boolean));
+  const set = new Set(historyRunsForBrowser().map((run) => run.folder).filter(Boolean));
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 
@@ -1036,7 +1041,7 @@ function folderLabel(folderKey) {
 }
 
 function folderRuns(folderKey) {
-  return historyRunsForView().filter((run) => {
+  return historyRunsForBrowser().filter((run) => {
     if (folderKey === "uncategorized") return !run.folder;
     return run.folder === folderKey;
   });
@@ -1056,11 +1061,14 @@ function folderSummaries() {
   return summaries
     .map((folder) => ({
       ...folder,
-      latest: folder.runs.slice().sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))[0],
+      latest: folder.runs.slice().sort((a, b) => compareHistoryRuns(a, b, "time"))[0],
       matches: !q || folder.label.toLowerCase().includes(q) || folder.runs.some(runMatchesSearch),
     }))
     .filter((folder) => folder.matches)
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort((a, b) => {
+      if (state.historySort === "name") return a.label.localeCompare(b.label);
+      return compareHistoryRuns(a.latest, b.latest, "time") || a.label.localeCompare(b.label);
+    });
 }
 
 function folderCard(folder) {
@@ -1112,7 +1120,15 @@ function historyLayout() {
           <button data-action="refresh">Refresh</button>
         </div>
         ${historyFolderNav({ root, currentLabel, folderCount })}
-        <input id="run-search" placeholder="${root ? "Search folders and runs" : "Search this folder"}" value="${escapeHtml(state.runSearch)}">
+        <div class="history-tools">
+          <input id="run-search" placeholder="${root ? "Search folders and runs" : "Search this folder"}" value="${escapeHtml(state.runSearch)}">
+          <label>Sort
+            <select id="history-sort">
+              <option value="time" ${state.historySort === "time" ? "selected" : ""}>Time</option>
+              <option value="name" ${state.historySort === "name" ? "selected" : ""}>Name</option>
+            </select>
+          </label>
+        </div>
         <div id="history-browser">${historyBrowserContent()}</div>
       </aside>
       ${state.isPhone ? "" : `<article class="panel run-details">${selected ? runDetails(selected, { context: "desktop" }) : empty(root ? "Open a folder to see runs." : "Select a run.")}</article>`}
@@ -1188,15 +1204,17 @@ function runCard(run) {
   const terrainPreset = run.terrain_preset_id || params.terrain_preset_id || "baseline";
   const videoState = resolvedVideoStatus(run, video.state);
   const convLabel = convergenceLabel(run);
+  const pending = Boolean(run.pending_confirmation);
   return `
-    <button class="run-card ${active ? "active" : ""}" data-action="select-run" data-id="${escapeHtml(run.id)}">
+    <button class="run-card ${active ? "active" : ""} ${pending ? "pending-confirmation" : ""}" data-action="select-run" data-id="${escapeHtml(run.id)}">
       <span class="run-card-top">
         <strong>${escapeHtml(run.display_name || run.id)}</strong>
         <span class="badge ${statusTone(run.status)}">${escapeHtml(runStatusLabel(run))}</span>
+        ${pending ? `<span class="badge muted">pending mother</span>` : ""}
         ${convLabel ? `<span class="badge good">${escapeHtml(convLabel)}</span>` : ""}
       </span>
       <small>${escapeHtml(run.folder || "Uncategorized")} - ${escapeHtml(formatRelativeTime(run.created_at))}</small>
-      <small>${run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"} - video ${escapeHtml(videoState)} - terrain ${escapeHtml(terrainPreset)}</small>
+      <small>${pending ? "waiting for mother confirmation" : run.latest_checkpoint ? "checkpoint ready" : "no checkpoint"} - video ${escapeHtml(videoState)} - terrain ${escapeHtml(terrainPreset)}</small>
     </button>
   `;
 }
@@ -1517,7 +1535,8 @@ function runDetails(run, { context = "desktop" } = {}) {
         <span id="selected-run-status" class="badge ${statusTone(run.status)}">${escapeHtml(runStatusLabel(run))}</span>
       </div>
       <section class="subpanel">
-        <h3>Launch Queue</h3>
+        <h3>Waiting For Mother</h3>
+        <p class="muted">This request has not produced a synced mother run yet. It will be replaced by the real run as soon as mother confirms it.</p>
         <div class="details-grid">
           <article class="run-info-card"><span>Task</span><strong>${escapeHtml(params.task || "-")}</strong><small>${escapeHtml(params.device || "cuda:0")}</small></article>
           <article class="run-info-card"><span>Scale</span><strong>${escapeHtml(params.num_envs || "-")} envs</strong><small>${escapeHtml(params.max_iterations || "-")} iterations</small></article>
@@ -2147,7 +2166,7 @@ async function queueTraining() {
   state.trainForm.display_name = "";
   const runNameInput = document.querySelector("#run-display-name");
   if (runNameInput) runNameInput.value = "";
-  setMessage(`Queued training with ${preset.name} and ${terrainPreset.name}. It is now visible in History.`);
+  setMessage(`Queued training with ${preset.name} and ${terrainPreset.name}. It will stay gray in History until mother confirms the run.`);
 }
 
 function applyTweakPayload(payload) {
@@ -2919,6 +2938,11 @@ document.addEventListener("change", (event) => {
   }
   if (event.target.id === "folder-filter") {
     state.folderFilter = event.target.value;
+    renderRunListOnly();
+  }
+  if (event.target.id === "history-sort") {
+    state.historySort = event.target.value === "name" ? "name" : "time";
+    localStorage.setItem("redrhex_child_history_sort", state.historySort);
     renderRunListOnly();
   }
   if (event.target.classList.contains("terrain-input") && state.draftTerrainPreset) {

@@ -1948,13 +1948,29 @@ async function handleLogin() {
   if (btn) { btn.disabled = true; btn.textContent = "Signing in…"; }
   setLoginError("");
   try {
-    await signIn(email, password);
-    state.user = await currentUser();
-    await loadProfile();
+    const session = await signIn(email, password);
+    state.user = session?.user || await currentUser();
+    if (!state.user) {
+      throw new Error("Sign in succeeded, but Supabase did not return a user session.");
+    }
+    state.profile = { id: state.user.id, email: state.user.email, role: "viewer" };
+    state.loadError = "";
+    render();
+    try {
+      await loadProfile();
+    } catch (error) {
+      state.loadError = `Signed in, but profile loading failed: ${friendlyErrorMessage(error)}`;
+      render();
+    }
     await refresh();
     setMessage("Signed in.");
   } catch (error) {
-    setLoginError(friendlyErrorMessage(error));
+    if (state.user) {
+      state.loadError = friendlyErrorMessage(error);
+      render();
+    } else {
+      setLoginError(friendlyErrorMessage(error));
+    }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
   }

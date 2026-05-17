@@ -1,4 +1,13 @@
-import { HEARTBEAT_STALE_MS } from "./config.js";
+import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.0-history-sync";
+import {
+  convergenceLabel as catalogConvergenceLabel,
+  jobDisplayStatus as catalogJobDisplayStatus,
+  resolvedVideoStatus as catalogResolvedVideoStatus,
+  statusDescriptor as catalogStatusDescriptor,
+  statusDescription as catalogStatusDescription,
+  statusLabel as catalogStatusLabel,
+  statusTone as catalogStatusTone,
+} from "./status_catalog.js?v=3.3.0-history-sync";
 
 export const BUILT_IN_REWARD_PRESETS = [
   {
@@ -351,10 +360,29 @@ export function machineState(machine, now = Date.now()) {
 
 export function statusTone(status) {
   const normalized = String(status || "").toLowerCase();
-  if (["completed", "ready", "online", "accepting", "success"].includes(normalized)) return "good";
-  if (["running", "claimed", "queued", "busy", "launched"].includes(normalized)) return "info";
-  if (["failed", "cancelled", "offline", "missing"].includes(normalized)) return "bad";
-  return "muted";
+  if (["ready", "busy", "paused", "offline", "missing"].includes(normalized)) {
+    return catalogStatusTone("machine", normalized);
+  }
+  if (["recordable", "uploading"].includes(normalized)) {
+    return catalogStatusTone("artifact", normalized);
+  }
+  if (["claimed", "launched"].includes(normalized)) {
+    return catalogStatusTone("job", normalized);
+  }
+  if (["online", "accepting", "success"].includes(normalized)) return "good";
+  return catalogStatusTone("run", normalized);
+}
+
+export function statusDescriptor(kind, status, context = {}) {
+  return catalogStatusDescriptor(kind, status, context);
+}
+
+export function statusLabel(kind, status, context = {}) {
+  return catalogStatusLabel(kind, status, context);
+}
+
+export function jobDisplayStatus(job = {}) {
+  return catalogJobDisplayStatus(job);
 }
 
 export function hasActiveRemoteWork(snapshot = {}) {
@@ -380,8 +408,8 @@ export function jobQueueLabel(job = {}, machine = null) {
   if (status === "claimed") return "claimed by worker";
   if (status === "running") return "running";
   if (status === "failed") return job.error || "failed";
-  if (status === "completed" && type === "start_training") return "launched";
-  if (status === "completed") return "completed";
+  if (status === "completed" && type === "start_training") return statusLabel("job", "launched");
+  if (status === "completed") return statusLabel("job", "completed");
   return status || "unknown";
 }
 
@@ -688,3 +716,8 @@ export function normalizePreset(raw) {
 export function normalizeTerrainPreset(raw) {
   return normalizePreset(raw);
 }
+
+// Re-exports from status_catalog — keeps remote_app.js importing only from core.js.
+export const convergenceLabel    = catalogConvergenceLabel;
+export const resolvedVideoStatus = catalogResolvedVideoStatus;
+export const statusDescription   = catalogStatusDescription;

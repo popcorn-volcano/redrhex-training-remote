@@ -1177,29 +1177,15 @@ video {
 .reward-row span {
   display: grid;
   gap: 3px;
-  min-width: 0;
 }
 
 .terrain-row {
-  grid-template-columns: minmax(0, 1fr) minmax(95px, 140px);
-  align-items: center;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 220px);
 }
 
 .terrain-control {
   display: grid;
   gap: 5px;
-  min-width: 0;
-  width: 100%;
-  justify-self: stretch;
-}
-
-.terrain-row code {
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .terrain-control small {

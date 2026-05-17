@@ -19,6 +19,11 @@ import {
   slugify,
   videoStateForRun,
 } from "./core.js";
+import {
+  filterDeletedRuns,
+  historyRunsForSnapshot,
+  syntheticRunsFromJobs,
+} from "./history_sync.js";
 
 test("role helpers keep viewers read-only", () => {
   assert.equal(canOperate("viewer"), false);
@@ -127,4 +132,29 @@ test("slugify returns stable storage-safe ids", () => {
 test("built-in preset fallback keeps training usable before schema update", () => {
   assert.equal(BUILT_IN_REWARD_PRESETS.length >= 3, true);
   assert.equal(BUILT_IN_REWARD_PRESETS[0].id, "baseline");
+});
+
+test("history tombstones hide deleted real runs by log directory name", () => {
+  const visible = filterDeletedRuns([
+    { id: "run-a", log_dir: "/repo/logs/rsl_rl/redrhex/2026-05-17_keep" },
+    { id: "run-b", log_dir: "/repo/logs/rsl_rl/redrhex/2026-05-17_delete_me" },
+  ], [
+    { id: "alias-b", log_dir_name: "2026-05-17_delete_me" },
+  ]);
+  assert.deepEqual(visible.map((run) => run.id), ["run-a"]);
+});
+
+test("history tombstones keep old completed jobs from recreating deleted runs", () => {
+  const jobs = [
+    {
+      id: "job-one",
+      type: "start_training",
+      status: "completed",
+      created_at: "2026-05-17T00:00:00Z",
+      result: { local_run_id: "panel_20260517_deleted" },
+      payload: { display_name: "Deleted child launch" },
+    },
+  ];
+  assert.deepEqual(syntheticRunsFromJobs(jobs, [], [{ id: "panel_20260517_deleted" }]), []);
+  assert.deepEqual(historyRunsForSnapshot({ jobs, runs: [], runDeletions: [{ id: "panel_20260517_deleted" }] }), []);
 });

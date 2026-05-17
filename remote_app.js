@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.4-video-pulse-sort";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.5-own-video-guard";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,15 +11,15 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.3.4-video-pulse-sort";
-import { createRemoteRealtime } from "./realtime.js?v=3.3.4-video-pulse-sort";
+} from "./api.js?v=3.3.5-own-video-guard";
+import { createRemoteRealtime } from "./realtime.js?v=3.3.5-own-video-guard";
 import {
   compareHistoryRuns,
   historyRunsForSnapshot,
   jobClientRequestId,
   normalizeHistorySort,
   realRunConfirmsJob,
-} from "./history_sync.js?v=3.3.4-video-pulse-sort";
+} from "./history_sync.js?v=3.3.5-own-video-guard";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -56,7 +56,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.3.4-video-pulse-sort";
+} from "./core.js?v=3.3.5-own-video-guard";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -64,8 +64,8 @@ const PHONE_MEDIA = window.matchMedia
 
 const TEXT_AUTOSAVE_DELAY_MS = 350;
 const THEME_KEY = "redrhex_to_go_theme";
-const CHILD_RELEASE_VERSION = "3.3.4";
-const CHILD_RELEASE_NAME = "Video Pulse Sort";
+const CHILD_RELEASE_VERSION = "3.3.5";
+const CHILD_RELEASE_NAME = "Own Video Guard";
 const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 const NOTIFICATION_EVENTS = [
   ["notify_training_converged", "Converged", "Reward improvement has flattened."],
@@ -1551,7 +1551,7 @@ function teamVideoSection(run) {
     : selectedOption?.label || "Selected checkpoint";
   const checkpointName = checkpoint ? checkpoint.split("/").pop() : "";
   return `
-    <section id="team-video-panel" class="subpanel" data-video-state="${escapeHtml(video.state)}" data-storage-path="${escapeHtml(storagePath)}">
+    <section id="team-video-panel" class="subpanel" data-run-id="${escapeHtml(run.id)}" data-video-state="${escapeHtml(video.state)}" data-storage-path="${escapeHtml(storagePath)}">
       <div class="section-head compact">
         <h3>Team Video</h3>
         <span class="badge ${statusTone(video.state)}">${escapeHtml(video.state)}</span>
@@ -1953,10 +1953,13 @@ function persistActiveRunMetadataDraft({ flush = false } = {}) {
 function patchTeamVideo(run) {
   const panel = document.querySelector("#team-video-panel");
   if (!panel || !run) return;
+  if ((panel.dataset.runId || "") !== String(run.id || "")) {
+    panel.outerHTML = teamVideoSection(run);
+    return;
+  }
   const video = videoStateForCheckpoint(run, state.snapshot.artifacts, selectedVideoCheckpoint(run));
   const nextStorage = video.artifact?.storage_path || "";
   const videoElement = panel.querySelector("video");
-  if (videoElement && panel.dataset.storagePath && !nextStorage) return;
   const signedReady = Boolean(nextStorage && signedVideoEntry(nextStorage)?.url);
   const shouldReplace = (video.state === "ready" && signedReady && !videoElement) || shouldReplaceVideoPanel({
     currentState: panel.dataset.videoState || "",

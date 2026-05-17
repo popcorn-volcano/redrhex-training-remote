@@ -7,6 +7,7 @@ import {
   IDLE_REFRESH_MS,
   PENDING_CONFIRMATION_REFRESH_MS,
   VIDEO_REFRESH_MS,
+  artifactBelongsToRun,
   buildRunMetadataPatch,
   buildTrainingJob,
   canOperate,
@@ -21,6 +22,8 @@ import {
   refreshDelayForSnapshot,
   shouldReplaceVideoPanel,
   slugify,
+  videoArtifactForCheckpoint,
+  videoStateForCheckpoint,
   videoStateForRun,
 } from "./core.js";
 import {
@@ -143,6 +146,49 @@ test("video state distinguishes ready, uploading, recordable, and missing", () =
   assert.equal(videoStateForRun({ id: "run-a" }, [
     { run_id: "run-a", kind: "video", storage_path: "runs/run-a/videos/clip.mp4" },
   ]).state, "ready");
+});
+
+test("video artifacts must belong to the selected run and log directory", () => {
+  const run = {
+    id: "run-a",
+    log_dir: "/logs/run-a",
+    latest_checkpoint: "/logs/run-a/model_7.pt",
+  };
+  const ownVideo = {
+    run_id: "run-a",
+    kind: "video",
+    local_path: "/logs/run-a/videos/play/model_7_clip.mp4",
+    storage_path: "runs/run-a/videos/model_7_clip.mp4",
+    created_at: "2026-05-16T00:00:00Z",
+  };
+  const leakedVideo = {
+    run_id: "run-a",
+    kind: "video",
+    local_path: "/logs/other-run/videos/play/model_7_clip.mp4",
+    storage_path: "runs/run-a/videos/model_7_other.mp4",
+    created_at: "2026-05-17T00:00:00Z",
+  };
+  assert.equal(artifactBelongsToRun(run, ownVideo), true);
+  assert.equal(artifactBelongsToRun(run, leakedVideo), false);
+  assert.equal(videoArtifactForCheckpoint(run, [leakedVideo, ownVideo], run.latest_checkpoint), ownVideo);
+});
+
+test("checkpoint video selection does not fall back to a different checkpoint video", () => {
+  const run = {
+    id: "run-a",
+    log_dir: "/logs/run-a",
+    latest_checkpoint: "/logs/run-a/model_9.pt",
+  };
+  const olderVideo = {
+    run_id: "run-a",
+    kind: "video",
+    local_path: "/logs/run-a/videos/play/model_7_clip.mp4",
+    storage_path: "runs/run-a/videos/model_7_clip.mp4",
+    created_at: "2026-05-17T00:00:00Z",
+  };
+  assert.equal(videoArtifactForCheckpoint(run, [olderVideo], run.latest_checkpoint), null);
+  assert.equal(videoStateForCheckpoint(run, [olderVideo], run.latest_checkpoint).state, "recordable");
+  assert.equal(videoStateForRun({ ...run, latest_video: "/logs/other-run/videos/play/model_9_clip.mp4" }, []).state, "recordable");
 });
 
 test("video panel patching preserves active playback", () => {

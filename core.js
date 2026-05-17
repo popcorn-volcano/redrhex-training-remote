@@ -1,4 +1,4 @@
-import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.4-video-pulse-sort";
+import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.5-own-video-guard";
 import {
   convergenceLabel as catalogConvergenceLabel,
   jobDisplayStatus as catalogJobDisplayStatus,
@@ -7,7 +7,7 @@ import {
   statusDescription as catalogStatusDescription,
   statusLabel as catalogStatusLabel,
   statusTone as catalogStatusTone,
-} from "./status_catalog.js?v=3.3.4-video-pulse-sort";
+} from "./status_catalog.js?v=3.3.5-own-video-guard";
 
 export const BUILT_IN_REWARD_PRESETS = [
   {
@@ -477,12 +477,57 @@ export function latestVideoArtifact(runId, artifacts = []) {
   return matches[0] || null;
 }
 
+function storageSafe(value = "") {
+  return String(value || "").trim().replace(/[^A-Za-z0-9_.-]+/g, "_") || "run";
+}
+
+function isInsidePath(base = "", candidate = "") {
+  const normalizedBase = String(base || "").replaceAll("\\", "/").replace(/\/+$/, "");
+  const normalizedCandidate = String(candidate || "").replaceAll("\\", "/");
+  return Boolean(normalizedBase && (
+    normalizedCandidate === normalizedBase
+    || normalizedCandidate.startsWith(`${normalizedBase}/`)
+  ));
+}
+
+function runLocalPathBelongsToRun(run = {}, path = "") {
+  const value = String(path || "").trim();
+  if (!value) return false;
+  const logDir = String(run.log_dir || "").trim();
+  return !logDir || isInsidePath(logDir, value);
+}
+
+export function artifactBelongsToRun(run = {}, artifact = {}) {
+  const runId = String(run?.id || "").trim();
+  if (!runId || String(artifact?.run_id || "").trim() !== runId) return false;
+  const localPath = String(artifact.local_path || artifact.path || "").trim();
+  const logDir = String(run.log_dir || "").trim();
+  if (localPath && logDir && !isInsidePath(logDir, localPath)) return false;
+  const storagePath = String(artifact.storage_path || "").trim();
+  if (storagePath && !storagePath.startsWith(`runs/${storageSafe(runId)}/`)) return false;
+  return true;
+}
+
+export function artifactsForRun(run = {}, artifacts = [], kind = "") {
+  return artifacts.filter((artifact) => {
+    if (kind && artifact.kind !== kind) return false;
+    return artifactBelongsToRun(run, artifact);
+  });
+}
+
+export function latestVideoArtifactForRun(run = {}, artifacts = []) {
+  const matches = artifactsForRun(run, artifacts, "video")
+    .filter((artifact) => artifact.storage_path)
+    .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  return matches[0] || null;
+}
+
 export function hasAnyVideoRecord(run = {}, artifacts = []) {
-  return Boolean(run.latest_video) || artifacts.some((artifact) => artifact.run_id === run.id && artifact.kind === "video");
+  return runLocalPathBelongsToRun(run, run.latest_video) || artifactsForRun(run, artifacts, "video").length > 0;
 }
 
 export function videoStateForRun(run = {}, artifacts = []) {
-  const artifact = latestVideoArtifact(run.id, artifacts);
+  const artifact = latestVideoArtifactForRun(run, artifacts);
   if (artifact) return { state: "ready", artifact };
   if (hasAnyVideoRecord(run, artifacts)) return { state: "uploading", artifact: null };
   if (run.latest_checkpoint) return { state: "recordable", artifact: null };
@@ -490,7 +535,7 @@ export function videoStateForRun(run = {}, artifacts = []) {
 }
 
 export function checkpointIteration(path = "") {
-  const match = String(path || "").match(/model_(\d+)\.pt(?:$|[?#])/);
+  const match = String(path || "").match(/model_(\d+)(?:\.pt|[^0-9]|$)/);
   return match ? Number(match[1]) : null;
 }
 
@@ -506,7 +551,7 @@ export function checkpointArtifactsForRun(run = {}, artifacts = []) {
     });
   }
   artifacts
-    .filter((artifact) => artifact.run_id === run.id && artifact.kind === "checkpoint")
+    .filter((artifact) => artifactBelongsToRun(run, artifact) && artifact.kind === "checkpoint")
     .forEach((artifact) => {
       const path = String(artifact.local_path || artifact.path || "");
       if (!path) return;
@@ -531,15 +576,14 @@ export function checkpointOptionsForRun(run = {}, artifacts = []) {
 
 export function videoArtifactForCheckpoint(run = {}, artifacts = [], checkpoint = "") {
   const iteration = checkpointIteration(checkpoint);
-  const videos = artifacts
-    .filter((artifact) => artifact.run_id === run.id && artifact.kind === "video" && artifact.storage_path)
+  const videos = artifactsForRun(run, artifacts, "video")
+    .filter((artifact) => artifact.storage_path)
     .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
   if (Number.isFinite(iteration)) {
-    const pattern = new RegExp(`model_${iteration}(?:\\D|$)`);
-    const exact = videos.find((artifact) => pattern.test(`${artifact.storage_path || ""} ${artifact.local_path || ""}`));
+    const exact = videos.find((artifact) => checkpointIteration(`${artifact.local_path || ""} ${artifact.storage_path || ""}`) === iteration);
     if (exact) return exact;
   }
-  if (checkpoint && run.latest_checkpoint && String(checkpoint) === String(run.latest_checkpoint)) {
+  if (!checkpoint && !Number.isFinite(iteration)) {
     return videos[0] || null;
   }
   return null;
@@ -548,12 +592,10 @@ export function videoArtifactForCheckpoint(run = {}, artifacts = [], checkpoint 
 export function hasVideoRecordForCheckpoint(run = {}, artifacts = [], checkpoint = "") {
   if (videoArtifactForCheckpoint(run, artifacts, checkpoint)) return true;
   const iteration = checkpointIteration(checkpoint);
-  if (!Number.isFinite(iteration)) return hasAnyVideoRecord(run, artifacts);
-  const pattern = new RegExp(`model_${iteration}(?:\\D|$)`);
-  return Boolean(run.latest_video && pattern.test(String(run.latest_video))) || artifacts.some((artifact) => (
-    artifact.run_id === run.id
-    && artifact.kind === "video"
-    && pattern.test(`${artifact.local_path || ""} ${artifact.storage_path || ""}`)
+  if (!Number.isFinite(iteration)) return !checkpoint && hasAnyVideoRecord(run, artifacts);
+  return Boolean(runLocalPathBelongsToRun(run, run.latest_video) && checkpointIteration(String(run.latest_video)) === iteration) || artifactsForRun(run, artifacts).some((artifact) => (
+    artifact.kind === "video"
+    && checkpointIteration(`${artifact.local_path || ""} ${artifact.storage_path || ""}`) === iteration
   ));
 }
 

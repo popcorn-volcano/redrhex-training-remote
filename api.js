@@ -1,5 +1,5 @@
-import { SUPABASE_ANON_KEY, SUPABASE_URL, VIDEO_BUCKET } from "./config.js?v=3.3.4-video-pulse-sort";
-import { BUILT_IN_REWARD_PRESETS, BUILT_IN_TERRAIN_PRESETS } from "./core.js?v=3.3.4-video-pulse-sort";
+import { SUPABASE_ANON_KEY, SUPABASE_URL, VIDEO_BUCKET } from "./config.js?v=3.3.5-own-video-guard";
+import { BUILT_IN_REWARD_PRESETS, BUILT_IN_TERRAIN_PRESETS } from "./core.js?v=3.3.5-own-video-guard";
 
 const TOKEN_KEY = "redrhex_child_access_token";
 const REFRESH_KEY = "redrhex_child_refresh_token";

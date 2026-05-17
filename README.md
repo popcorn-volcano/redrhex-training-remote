@@ -2,7 +2,7 @@
 
 GitHub Pages child UI for the RedRHex Training Panel V3.2 remote system.
 
-**Child release:** RedRHex To Go V3.3.4 — Video Pulse Sort
+**Child release:** RedRHex To Go V3.3.5 — Own Video Guard
 
 Open:
 

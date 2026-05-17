@@ -1,5 +1,5 @@
-import { SUPABASE_ANON_KEY, SUPABASE_URL, VIDEO_BUCKET } from "./config.js?v=3.3.5-own-video-guard";
-import { BUILT_IN_REWARD_PRESETS, BUILT_IN_TERRAIN_PRESETS } from "./core.js?v=3.3.5-own-video-guard";
+import { SUPABASE_ANON_KEY, SUPABASE_URL, VIDEO_BUCKET } from "./config.js?v=3.3.6-tensorboard-summary";
+import { BUILT_IN_REWARD_PRESETS, BUILT_IN_TERRAIN_PRESETS } from "./core.js?v=3.3.6-tensorboard-summary";
 
 const TOKEN_KEY = "redrhex_child_access_token";
 const REFRESH_KEY = "redrhex_child_refresh_token";
@@ -182,7 +182,7 @@ export async function loadRemoteSnapshot(machineId, userId = "") {
     select("jobs", `select=*&order=created_at.desc&limit=60`),
     select("runs", `select=*&order=created_at.desc&limit=120`),
     optionalSelect("run_deletions", `select=*&order=deleted_at.desc&limit=500`),
-    optionalSelect("artifacts", `select=*&order=created_at.desc&limit=200`),
+    optionalSelect("artifacts", `select=*&order=created_at.desc&limit=500`),
     optionalSelect("reward_presets", `select=*&order=built_in.desc,updated_at.desc,name.asc`),
     optionalSelect("terrain_presets", `select=*&order=built_in.desc,updated_at.desc,name.asc`),
     optionalSelect("profiles", `select=id,email,display_name,role`),

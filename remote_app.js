@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.5-own-video-guard";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.6-tensorboard-summary";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,15 +11,15 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.3.5-own-video-guard";
-import { createRemoteRealtime } from "./realtime.js?v=3.3.5-own-video-guard";
+} from "./api.js?v=3.3.6-tensorboard-summary";
+import { createRemoteRealtime } from "./realtime.js?v=3.3.6-tensorboard-summary";
 import {
   compareHistoryRuns,
   historyRunsForSnapshot,
   jobClientRequestId,
   normalizeHistorySort,
   realRunConfirmsJob,
-} from "./history_sync.js?v=3.3.5-own-video-guard";
+} from "./history_sync.js?v=3.3.6-tensorboard-summary";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -53,10 +53,11 @@ import {
   statusDescription,
   statusLabel,
   statusTone,
+  tensorboardSummaryStateForRun,
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.3.5-own-video-guard";
+} from "./core.js?v=3.3.6-tensorboard-summary";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -64,8 +65,8 @@ const PHONE_MEDIA = window.matchMedia
 
 const TEXT_AUTOSAVE_DELAY_MS = 350;
 const THEME_KEY = "redrhex_to_go_theme";
-const CHILD_RELEASE_VERSION = "3.3.5";
-const CHILD_RELEASE_NAME = "Own Video Guard";
+const CHILD_RELEASE_VERSION = "3.3.6";
+const CHILD_RELEASE_NAME = "TensorBoard Summary";
 const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 const NOTIFICATION_EVENTS = [
   ["notify_training_converged", "Converged", "Reward improvement has flattened."],
@@ -1583,6 +1584,30 @@ function teamVideoSection(run) {
   `;
 }
 
+function tensorboardSummarySection(run) {
+  const summary = tensorboardSummaryStateForRun(run, state.snapshot.artifacts);
+  const url = summary.url || "";
+  return `
+    <section id="tensorboard-summary-panel" class="subpanel" data-run-id="${escapeHtml(run.id)}" data-state="${escapeHtml(summary.state)}" data-url="${escapeHtml(url)}">
+      <div class="section-head compact">
+        <h3>TensorBoard Snapshot</h3>
+        <span class="badge ${statusTone(summary.state)}">${escapeHtml(summary.state)}</span>
+      </div>
+      ${url ? `
+        <a class="tensorboard-summary-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">
+          <img class="tensorboard-summary-image" src="${escapeHtml(url)}" alt="TensorBoard scalar summary for ${escapeHtml(run.display_name || run.id)}">
+        </a>
+      ` : summary.state === "generating" ? `
+        <p class="muted">Mother has TensorBoard scalars for this run. The snapshot image will appear after the next sync.</p>
+      ` : summary.state === "failed" ? `
+        <p class="muted">TensorBoard snapshot generation failed on mother. Open Console on mother for the run log details.</p>
+      ` : `
+        <p class="muted">No TensorBoard snapshot is available for this run yet.</p>
+      `}
+    </section>
+  `;
+}
+
 function runDetails(run, { context = "desktop" } = {}) {
   if (run.synthetic_job) {
     const params = run.params || {};
@@ -1630,6 +1655,7 @@ function runDetails(run, { context = "desktop" } = {}) {
       ${editable ? `<div class="autosave-row"><span id="run-autosave-status" class="autosave-status" data-state="${escapeHtml(state.runMetadataSaveStatus)}">${escapeHtml(runMetadataStatusText(state.runMetadataSaveStatus))}</span></div>` : ""}
     </section>
     ${teamVideoSection(run)}
+    ${tensorboardSummarySection(run)}
     <section class="subpanel">
       <h3>Safe Remote Actions</h3>
       <div class="button-row wrap">
@@ -1972,6 +1998,20 @@ function patchTeamVideo(run) {
   panel.outerHTML = teamVideoSection(run);
 }
 
+function patchTensorboardSummary(run) {
+  const panel = document.querySelector("#tensorboard-summary-panel");
+  if (!panel || !run) return;
+  const summary = tensorboardSummaryStateForRun(run, state.snapshot.artifacts);
+  const nextUrl = summary.url || "";
+  if (
+    (panel.dataset.runId || "") !== String(run.id || "")
+    || (panel.dataset.state || "") !== summary.state
+    || (panel.dataset.url || "") !== nextUrl
+  ) {
+    panel.outerHTML = tensorboardSummarySection(run);
+  }
+}
+
 function patchSelectedRunDetails() {
   const details = document.querySelector(".run-details, .inline-run-details");
   const run = selectedHistoryRun();
@@ -2006,6 +2046,7 @@ function patchSelectedRunDetails() {
   }
 
   patchTeamVideo(run);
+  patchTensorboardSummary(run);
   const related = document.querySelector("#related-jobs-panel");
   if (related) related.outerHTML = relatedJobsSection(run);
 }

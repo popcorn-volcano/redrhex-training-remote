@@ -1,5 +1,5 @@
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js?v=3.3.5-own-video-guard";
-import { sessionStore } from "./api.js?v=3.3.5-own-video-guard";
+import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js?v=3.3.6-tensorboard-summary";
+import { sessionStore } from "./api.js?v=3.3.6-tensorboard-summary";
 
 const REALTIME_IMPORT_URL = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 const TABLES = ["runs", "jobs", "artifacts", "machines", "run_deletions"];

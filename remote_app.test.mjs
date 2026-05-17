@@ -17,11 +17,13 @@ import {
   isMachineFresh,
   jobQueueLabel,
   jobRunId,
+  latestTensorboardSummaryArtifactForRun,
   latestVideoArtifact,
   machineState,
   refreshDelayForSnapshot,
   shouldReplaceVideoPanel,
   slugify,
+  tensorboardSummaryStateForRun,
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
@@ -171,6 +173,30 @@ test("video artifacts must belong to the selected run and log directory", () => 
   assert.equal(artifactBelongsToRun(run, ownVideo), true);
   assert.equal(artifactBelongsToRun(run, leakedVideo), false);
   assert.equal(videoArtifactForCheckpoint(run, [leakedVideo, ownVideo], run.latest_checkpoint), ownVideo);
+});
+
+test("tensorboard summary artifacts must belong to the selected run and log directory", () => {
+  const run = {
+    id: "run-a",
+    log_dir: "/logs/run-a",
+  };
+  const ownSummary = {
+    run_id: "run-a",
+    kind: "tensorboard_summary",
+    local_path: "/logs/run-a/training_panel/tensorboard_summary.png",
+    public_url: "https://mother.example.com/api/runs/run-a/tensorboard-summary.png",
+    created_at: "2026-05-16T00:00:00Z",
+  };
+  const leakedSummary = {
+    run_id: "run-a",
+    kind: "tensorboard_summary",
+    local_path: "/logs/other-run/training_panel/tensorboard_summary.png",
+    public_url: "https://mother.example.com/api/runs/other-run/tensorboard-summary.png",
+    created_at: "2026-05-17T00:00:00Z",
+  };
+  assert.equal(latestTensorboardSummaryArtifactForRun(run, [leakedSummary, ownSummary]), ownSummary);
+  assert.equal(tensorboardSummaryStateForRun(run, [leakedSummary, ownSummary]).url, ownSummary.public_url);
+  assert.equal(tensorboardSummaryStateForRun({ id: "run-a", has_tensorboard: true }, []).state, "generating");
 });
 
 test("checkpoint video selection does not fall back to a different checkpoint video", () => {

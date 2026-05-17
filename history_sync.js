@@ -1,4 +1,4 @@
-import { jobDisplayStatus } from "./status_catalog.js?v=3.3.5-own-video-guard";
+import { jobDisplayStatus } from "./status_catalog.js?v=3.3.6-tensorboard-summary";
 
 export const PENDING_SYNTHETIC_JOB_MAX_AGE_MS = 30 * 60 * 1000;
 

@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.3-queue-fast-claim";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.3.4-video-pulse-sort";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,15 +11,15 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.3.3-queue-fast-claim";
-import { createRemoteRealtime } from "./realtime.js?v=3.3.3-queue-fast-claim";
+} from "./api.js?v=3.3.4-video-pulse-sort";
+import { createRemoteRealtime } from "./realtime.js?v=3.3.4-video-pulse-sort";
 import {
   compareHistoryRuns,
   historyRunsForSnapshot,
   jobClientRequestId,
   normalizeHistorySort,
   realRunConfirmsJob,
-} from "./history_sync.js?v=3.3.3-queue-fast-claim";
+} from "./history_sync.js?v=3.3.4-video-pulse-sort";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -56,7 +56,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.3.3-queue-fast-claim";
+} from "./core.js?v=3.3.4-video-pulse-sort";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -64,8 +64,8 @@ const PHONE_MEDIA = window.matchMedia
 
 const TEXT_AUTOSAVE_DELAY_MS = 350;
 const THEME_KEY = "redrhex_to_go_theme";
-const CHILD_RELEASE_VERSION = "3.3.3";
-const CHILD_RELEASE_NAME = "Queue Fast Claim";
+const CHILD_RELEASE_VERSION = "3.3.4";
+const CHILD_RELEASE_NAME = "Video Pulse Sort";
 const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 const NOTIFICATION_EVENTS = [
   ["notify_training_converged", "Converged", "Reward improvement has flattened."],
@@ -1115,7 +1115,8 @@ function folderSummaries() {
   return summaries
     .map((folder) => ({
       ...folder,
-      latest: folder.runs.slice().sort((a, b) => compareHistoryRuns(a, b, "newest"))[0],
+      newest: folder.runs.slice().sort((a, b) => compareHistoryRuns(a, b, "newest"))[0],
+      oldest: folder.runs.slice().sort((a, b) => compareHistoryRuns(a, b, "oldest"))[0],
       sortRun: folder.runs.slice().sort((a, b) => compareHistoryRuns(a, b, state.historySort))[0],
       matches: !q || folder.label.toLowerCase().includes(q) || folder.runs.some(runMatchesSearch),
     }))
@@ -1129,6 +1130,9 @@ function folderSummaries() {
 function folderCard(folder) {
   const completed = folder.runs.filter((run) => run.status === "completed").length;
   const running = folder.runs.filter((run) => ["running", "stopping"].includes(String(run.status || "").toLowerCase())).length;
+  const referenceRun = state.historySort === "oldest" ? folder.oldest : folder.newest;
+  const referenceLabel = state.historySort === "oldest" ? "Oldest" : "Newest";
+  const referenceTime = referenceRun?.created_at || referenceRun?.started_at || referenceRun?.updated_at || "";
   return `
     <button class="folder-card" data-action="open-folder" data-folder="${escapeHtml(folder.key)}">
       <span class="folder-card-top">
@@ -1136,7 +1140,7 @@ function folderCard(folder) {
         <span class="badge">${folder.runs.length} run${folder.runs.length === 1 ? "" : "s"}</span>
       </span>
       <small>${running ? `${running} running - ` : ""}${completed} completed</small>
-      <small>Latest ${escapeHtml(formatRelativeTime(folder.latest?.updated_at || folder.latest?.created_at))}</small>
+      <small>${referenceLabel} ${escapeHtml(formatRelativeTime(referenceTime))}</small>
     </button>
   `;
 }

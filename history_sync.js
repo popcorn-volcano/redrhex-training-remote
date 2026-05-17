@@ -1,4 +1,4 @@
-import { jobDisplayStatus } from "./status_catalog.js?v=3.3.3-queue-fast-claim";
+import { jobDisplayStatus } from "./status_catalog.js?v=3.3.4-video-pulse-sort";
 
 export const PENDING_SYNTHETIC_JOB_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -71,8 +71,8 @@ export function filterDeletedRuns(runs = [], runDeletions = []) {
   return (runs || []).filter((run) => !isDeletedRunLike(run, deletions));
 }
 
-function timeValue(run = {}) {
-  const parsed = Date.parse(run.updated_at || run.created_at || "");
+export function historyTimeValue(run = {}) {
+  const parsed = Date.parse(run.created_at || run.started_at || run.updated_at || "");
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -89,12 +89,12 @@ export function normalizeHistorySort(sortBy = "newest") {
 export function compareHistoryRuns(a = {}, b = {}, sortBy = "newest") {
   const mode = normalizeHistorySort(sortBy);
   if (mode === "name") {
-    return nameValue(a).localeCompare(nameValue(b)) || timeValue(b) - timeValue(a);
+    return nameValue(a).localeCompare(nameValue(b)) || historyTimeValue(b) - historyTimeValue(a);
   }
   if (mode === "oldest") {
-    return timeValue(a) - timeValue(b) || nameValue(a).localeCompare(nameValue(b));
+    return historyTimeValue(a) - historyTimeValue(b) || nameValue(a).localeCompare(nameValue(b));
   }
-  return timeValue(b) - timeValue(a) || nameValue(a).localeCompare(nameValue(b));
+  return historyTimeValue(b) - historyTimeValue(a) || nameValue(a).localeCompare(nameValue(b));
 }
 
 export function isFreshPendingJob(job = {}, nowMs = Date.now(), maxAgeMs = PENDING_SYNTHETIC_JOB_MAX_AGE_MS) {
@@ -142,7 +142,7 @@ export function realRunConfirmsJob(job = {}, realRuns = []) {
   const jobCreated = jobTimeValue(job);
   const jobName = clean(payload.display_name).toLowerCase();
   return (realRuns || []).some((run) => {
-    const runCreated = timeValue(run);
+    const runCreated = historyTimeValue(run);
     if (jobCreated && runCreated && runCreated < jobCreated - 60_000) return false;
 
     const runName = clean(run.display_name).toLowerCase();

@@ -1,4 +1,4 @@
-import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.3-queue-fast-claim";
+import { HEARTBEAT_STALE_MS } from "./config.js?v=3.3.4-video-pulse-sort";
 import {
   convergenceLabel as catalogConvergenceLabel,
   jobDisplayStatus as catalogJobDisplayStatus,
@@ -7,7 +7,7 @@ import {
   statusDescription as catalogStatusDescription,
   statusLabel as catalogStatusLabel,
   statusTone as catalogStatusTone,
-} from "./status_catalog.js?v=3.3.3-queue-fast-claim";
+} from "./status_catalog.js?v=3.3.4-video-pulse-sort";
 
 export const BUILT_IN_REWARD_PRESETS = [
   {
@@ -315,6 +315,8 @@ export const ACTIVE_JOB_STATUSES = new Set(["queued", "claimed", "running"]);
 export const GPU_JOB_TYPES = new Set(["start_training", "record_video", "export_onnx"]);
 export const PENDING_CONFIRMATION_REFRESH_MS = 1_500;
 export const PENDING_CONFIRMATION_MAX_AGE_MS = 30 * 60 * 1000;
+export const VIDEO_REFRESH_MS = 1_500;
+export const VIDEO_REFRESH_RECENT_MS = 2 * 60 * 1000;
 export const ACTIVE_REFRESH_MS = 3_000;
 export const IDLE_REFRESH_MS = 5_000;
 
@@ -407,8 +409,31 @@ export function hasPendingTrainingConfirmation(snapshot = {}, nowMs = Date.now()
   });
 }
 
+export function hasVideoRefreshPulse(snapshot = {}, nowMs = Date.now()) {
+  const jobs = Array.isArray(snapshot.jobs) ? snapshot.jobs : [];
+  const runs = Array.isArray(snapshot.runs) ? snapshot.runs : [];
+  const artifacts = Array.isArray(snapshot.artifacts) ? snapshot.artifacts : [];
+  if (jobs.some((job) => {
+    if (String(job?.type || "") !== "record_video") return false;
+    const status = String(job?.status || "").toLowerCase();
+    if (ACTIVE_JOB_STATUSES.has(status)) return true;
+    if (status !== "completed" && status !== "failed") return false;
+    const timestamp = Date.parse(job?.updated_at || job?.created_at || "");
+    return Number.isFinite(timestamp) && timestamp >= nowMs - VIDEO_REFRESH_RECENT_MS;
+  })) {
+    return true;
+  }
+  return runs.some((run) => {
+    const videoStatus = String(run?.video_status || "").toLowerCase();
+    if (videoStatus === "recording") return true;
+    if (videoStateForRun(run, artifacts).state === "uploading") return true;
+    return false;
+  });
+}
+
 export function refreshDelayForSnapshot(snapshot = {}) {
   if (hasPendingTrainingConfirmation(snapshot)) return PENDING_CONFIRMATION_REFRESH_MS;
+  if (hasVideoRefreshPulse(snapshot)) return VIDEO_REFRESH_MS;
   return hasActiveRemoteWork(snapshot) ? ACTIVE_REFRESH_MS : IDLE_REFRESH_MS;
 }
 

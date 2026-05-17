@@ -6,11 +6,13 @@ import {
   ACTIVE_REFRESH_MS,
   IDLE_REFRESH_MS,
   PENDING_CONFIRMATION_REFRESH_MS,
+  VIDEO_REFRESH_MS,
   buildRunMetadataPatch,
   buildTrainingJob,
   canOperate,
   hasActiveRemoteWork,
   hasPendingTrainingConfirmation,
+  hasVideoRefreshPulse,
   isMachineFresh,
   jobQueueLabel,
   jobRunId,
@@ -22,6 +24,7 @@ import {
   videoStateForRun,
 } from "./core.js";
 import {
+  historyTimeValue,
   historyRunsForSnapshot,
   jobClientRequestId,
   realRunConfirmsJob,
@@ -84,6 +87,22 @@ test("auto refresh briefly speeds up while training waits for mother confirmatio
   assert.equal(refreshDelayForSnapshot({ jobs: [pending], runs: [], machine: { gpu_locked: false } }), PENDING_CONFIRMATION_REFRESH_MS);
   assert.equal(
     hasPendingTrainingConfirmation({ jobs: [{ ...pending, result: { local_run_id: "panel-a" } }], runs: [{ id: "panel-a" }] }),
+    false,
+  );
+});
+
+test("auto refresh briefly speeds up while video is recording or uploading", () => {
+  const nowMs = Date.parse("2026-05-16T00:20:00Z");
+  const videoJob = { id: "video-job", type: "record_video", status: "completed", updated_at: "2026-05-16T00:19:00Z" };
+  const uploadingRun = { id: "run-a", latest_video: "/tmp/clip.mp4", video_status: "completed" };
+  assert.equal(hasVideoRefreshPulse({ jobs: [videoJob], runs: [], artifacts: [] }, nowMs), true);
+  assert.equal(refreshDelayForSnapshot({ jobs: [], runs: [uploadingRun], artifacts: [] }), VIDEO_REFRESH_MS);
+  assert.equal(
+    hasVideoRefreshPulse({
+      jobs: [],
+      runs: [uploadingRun],
+      artifacts: [{ run_id: "run-a", kind: "video", storage_path: "runs/run-a/videos/clip.mp4" }],
+    }, nowMs),
     false,
   );
 });
@@ -156,11 +175,12 @@ test("history sort can switch between newest, oldest, and name", () => {
   const snapshot = {
     runs: [
       { id: "run-b", display_name: "Zeta", created_at: "2026-05-16T00:00:00Z", updated_at: "2026-05-16T00:00:00Z" },
-      { id: "run-a", display_name: "Alpha", created_at: "2026-05-15T00:00:00Z", updated_at: "2026-05-15T00:00:00Z" },
+      { id: "run-a", display_name: "Alpha", created_at: "2026-05-15T00:00:00Z", updated_at: "2026-05-17T00:00:00Z" },
     ],
     jobs: [],
     runDeletions: [],
   };
+  assert.equal(historyTimeValue(snapshot.runs[1]), Date.parse("2026-05-15T00:00:00Z"));
   assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "newest" }).map((run) => run.id), ["run-b", "run-a"]);
   assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "time" }).map((run) => run.id), ["run-b", "run-a"]);
   assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "oldest" }).map((run) => run.id), ["run-a", "run-b"]);

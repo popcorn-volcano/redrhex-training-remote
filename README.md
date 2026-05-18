@@ -1,8 +1,8 @@
 # RedRHex To Go
 
-GitHub Pages child UI for the RedRHex Training Panel V3.4 remote system.
+GitHub Pages child UI for the RedRHex Training Panel V3.4.2 remote system.
 
-**Child release:** RedRHex To Go V3.4 — First Release
+**Child release:** RedRHex To Go V3.4.2 — Folder + Video Fixes
 
 中文使用手冊：[MANUAL_ZH.md](MANUAL_ZH.md)
 
@@ -33,7 +33,7 @@ Mother-only features remain in the local panel: terminal/process console, tmux a
 
 Push this repository to `main`. GitHub Pages deploys the static files from the repository root through the Pages workflow.
 
-Before using the new Rewards/Video features, apply the latest mother schema:
+Before using the new Rewards/Video/Folder features, apply the latest mother schema:
 
 ```text
 tools/training_panel/supabase/schema.sql

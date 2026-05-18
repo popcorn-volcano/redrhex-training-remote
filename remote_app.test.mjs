@@ -20,10 +20,12 @@ import {
   latestTensorboardSummaryArtifactForRun,
   latestVideoArtifact,
   machineState,
+  checkpointOptionsForRun,
   refreshDelayForSnapshot,
   shouldReplaceVideoPanel,
   slugify,
   tensorboardSummaryStateForRun,
+  videoAvailabilityForCheckpoint,
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
@@ -217,6 +219,27 @@ test("checkpoint video selection does not fall back to a different checkpoint vi
   assert.equal(videoArtifactForCheckpoint(run, [olderVideo], run.latest_checkpoint), null);
   assert.equal(videoStateForCheckpoint(run, [olderVideo], run.latest_checkpoint).state, "recordable");
   assert.equal(videoStateForRun({ ...run, latest_video: "/logs/other-run/videos/play/model_9_clip.mp4" }, []).state, "recordable");
+});
+
+test("video checkpoint options hide deleted compacted checkpoints", () => {
+  const run = {
+    id: "run-a",
+    log_dir: "/logs/run-a",
+    latest_checkpoint: "/logs/run-a/model_20.pt",
+    compacted_at: "2026-05-18T00:00:00Z",
+    compacted_deleted_count: 2,
+  };
+  const artifacts = [
+    { run_id: "run-a", kind: "checkpoint", local_path: "/logs/run-a/model_0.pt" },
+    { run_id: "run-a", kind: "checkpoint", local_path: "/logs/run-a/model_10.pt" },
+    { run_id: "run-a", kind: "checkpoint", local_path: "/logs/run-a/model_20.pt" },
+    { run_id: "run-a", kind: "video", local_path: "/logs/run-a/videos/play/model_10_video.mp4", storage_path: "runs/run-a/videos/model_10_video.mp4" },
+  ];
+
+  const options = checkpointOptionsForRun(run, artifacts);
+
+  assert.deepEqual(options.map((option) => option.iteration), [20]);
+  assert.equal(videoAvailabilityForCheckpoint(run, artifacts, options[0].path), "recordable");
 });
 
 test("video panel patching preserves active playback", () => {

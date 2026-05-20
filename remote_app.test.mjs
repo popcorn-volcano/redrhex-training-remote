@@ -31,6 +31,7 @@ import {
   videoStateForRun,
 } from "./core.js";
 import {
+  canonicalizeRealRuns,
   historyTimeValue,
   historyRunsForSnapshot,
   jobClientRequestId,
@@ -282,6 +283,47 @@ test("history sort can switch between newest, oldest, and name", () => {
   assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "time" }).map((run) => run.id), ["run-b", "run-a"]);
   assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "oldest" }).map((run) => run.id), ["run-a", "run-b"]);
   assert.deepEqual(historyRunsForSnapshot(snapshot, { sortBy: "name" }).map((run) => run.id), ["run-a", "run-b"]);
+});
+
+test("history collapses discovered aliases that share a panel log directory", () => {
+  const runs = canonicalizeRealRuns([
+    {
+      id: "2026-05-17_10-00-00_wheg",
+      log_dir: "/logs/rsl_rl/redrhex_wheg/2026-05-17_10-00-00_wheg",
+      folder: "weird_USD",
+      created_at: "2026-05-17T10:00:00Z",
+    },
+    {
+      id: "panel_20260517_100001_123456",
+      log_dir: "/logs/rsl_rl/redrhex_wheg/2026-05-17_10-00-00_wheg",
+      folder: "tests",
+      created_at: "2026-05-17T10:00:01Z",
+      params: { client_request_id: "child-123" },
+    },
+  ]);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].id, "panel_20260517_100001_123456");
+  assert.equal(runs[0].folder, "tests");
+});
+
+test("history alias collapse does not leak alias folder metadata", () => {
+  const runs = canonicalizeRealRuns([
+    {
+      id: "2026-05-17_10-00-00_wheg",
+      log_dir: "/logs/rsl_rl/redrhex_wheg/2026-05-17_10-00-00_wheg",
+      folder: "weird_USD",
+      created_at: "2026-05-17T10:00:00Z",
+    },
+    {
+      id: "panel_20260517_100001_123456",
+      log_dir: "/logs/rsl_rl/redrhex_wheg/2026-05-17_10-00-00_wheg",
+      created_at: "2026-05-17T10:00:01Z",
+      params: { client_request_id: "child-123" },
+    },
+  ]);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].id, "panel_20260517_100001_123456");
+  assert.equal(runs[0].folder, undefined);
 });
 
 test("history only shows fresh unconfirmed training jobs as pending placeholders", () => {

@@ -1,5 +1,5 @@
-import { SUPABASE_ANON_KEY, SUPABASE_URL, VIDEO_BUCKET } from "./config.js?v=3.4.2-folder-video-fixes";
-import { BUILT_IN_REWARD_PRESETS, BUILT_IN_TERRAIN_PRESETS } from "./core.js?v=3.4.2-folder-video-fixes";
+import { SUPABASE_ANON_KEY, SUPABASE_URL, VIDEO_BUCKET } from "./config.js?v=3.4.3-history-sync";
+import { BUILT_IN_REWARD_PRESETS, BUILT_IN_TERRAIN_PRESETS } from "./core.js?v=3.4.3-history-sync";
 
 const TOKEN_KEY = "redrhex_child_access_token";
 const REFRESH_KEY = "redrhex_child_refresh_token";
@@ -116,6 +116,22 @@ async function optionalSelect(table, query = "") {
   }
 }
 
+function mergeRows(groups = [], keyField = "id") {
+  const byKey = new Map();
+  const withoutKey = [];
+  for (const rows of groups) {
+    for (const row of rows || []) {
+      const key = String(row?.[keyField] || "").trim();
+      if (!key) {
+        withoutKey.push(row);
+        continue;
+      }
+      byKey.set(key, { ...(byKey.get(key) || {}), ...row });
+    }
+  }
+  return [...byKey.values(), ...withoutKey];
+}
+
 export async function insert(table, payload) {
   return supabaseFetch(`/rest/v1/${table}`, {
     method: "POST",
@@ -177,19 +193,25 @@ export async function loadRemoteSnapshot(machineId, userId = "") {
   const notificationQuery = userId
     ? `user_id=eq.${encodedUser}&machine_id=eq.${encodedMachine}&select=*&limit=1`
     : "select=*&limit=0";
-  const [machines, jobs, runs, deletionsResult, artifactsResult, presetsResult, terrainPresetsResult, teamFoldersResult, profilesResult, notificationResult] = await Promise.all([
+  const [machines, machineJobs, legacyJobsResult, claimedJobsResult, machineRuns, legacyRunsResult, deletionsResult, machineArtifactsResult, legacyArtifactsResult, presetsResult, terrainPresetsResult, teamFoldersResult, profilesResult, notificationResult] = await Promise.all([
     select("machines", `select=*&order=heartbeat_at.desc`),
-    select("jobs", `select=*&order=created_at.desc&limit=60`),
-    select("runs", `select=*&order=created_at.desc&limit=120`),
-    optionalSelect("run_deletions", `select=*&order=deleted_at.desc&limit=500`),
-    optionalSelect("artifacts", `select=*&order=created_at.desc&limit=500`),
+    select("jobs", `machine_id=eq.${encodedMachine}&select=*&order=created_at.desc&limit=200`),
+    optionalSelect("jobs", `machine_id=is.null&select=*&order=created_at.desc&limit=200`),
+    optionalSelect("jobs", `claimed_by=eq.${encodedMachine}&select=*&order=created_at.desc&limit=200`),
+    select("runs", `machine_id=eq.${encodedMachine}&select=*&order=created_at.desc&limit=1000`),
+    optionalSelect("runs", `machine_id=is.null&select=*&order=created_at.desc&limit=250`),
+    optionalSelect("run_deletions", `machine_id=eq.${encodedMachine}&select=*&order=deleted_at.desc&limit=1000`),
+    optionalSelect("artifacts", `machine_id=eq.${encodedMachine}&select=*&order=created_at.desc&limit=2500`),
+    optionalSelect("artifacts", `machine_id=is.null&select=*&order=created_at.desc&limit=500`),
     optionalSelect("reward_presets", `select=*&order=built_in.desc,updated_at.desc,name.asc`),
     optionalSelect("terrain_presets", `select=*&order=built_in.desc,updated_at.desc,name.asc`),
-    optionalSelect("team_folders", `select=*&order=name.asc`),
+    optionalSelect("team_folders", `machine_id=eq.${encodedMachine}&select=*&order=name.asc`),
     optionalSelect("profiles", `select=id,email,display_name,role`),
     optionalSelect("notification_settings", notificationQuery),
   ]);
-  const artifacts = artifactsResult.rows;
+  const jobs = mergeRows([machineJobs, legacyJobsResult.rows, claimedJobsResult.rows]);
+  const runs = mergeRows([machineRuns, legacyRunsResult.rows]);
+  const artifacts = mergeRows([machineArtifactsResult.rows, legacyArtifactsResult.rows]);
   const presets = presetsResult.ok ? presetsResult.rows : BUILT_IN_REWARD_PRESETS;
   const terrainPresets = terrainPresetsResult.ok ? terrainPresetsResult.rows : BUILT_IN_TERRAIN_PRESETS;
   return {
@@ -207,14 +229,14 @@ export async function loadRemoteSnapshot(machineId, userId = "") {
     terrainPresets,
     encodedMachine,
     schema: {
-      artifacts: artifactsResult.ok,
+      artifacts: machineArtifactsResult.ok,
       runDeletions: deletionsResult.ok,
       rewardPresets: presetsResult.ok,
       terrainPresets: terrainPresetsResult.ok,
       teamFolders: teamFoldersResult.ok,
       warnings: [
         deletionsResult.ok ? "" : `Run deletion tombstones unavailable: ${deletionsResult.error}`,
-        artifactsResult.ok ? "" : `Artifacts table unavailable: ${artifactsResult.error}`,
+        machineArtifactsResult.ok ? "" : `Artifacts table unavailable: ${machineArtifactsResult.error}`,
         presetsResult.ok ? "" : `Reward presets table unavailable: ${presetsResult.error}`,
         terrainPresetsResult.ok ? "" : `Terrain presets table unavailable: ${terrainPresetsResult.error}`,
         teamFoldersResult.ok ? "" : `Team folders table unavailable: ${teamFoldersResult.error}`,

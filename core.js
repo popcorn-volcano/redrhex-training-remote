@@ -1,4 +1,4 @@
-import { HEARTBEAT_STALE_MS } from "./config.js?v=3.4.2-folder-video-fixes";
+import { HEARTBEAT_STALE_MS } from "./config.js?v=3.4.3-history-sync";
 import {
   convergenceLabel as catalogConvergenceLabel,
   jobDisplayStatus as catalogJobDisplayStatus,
@@ -7,7 +7,7 @@ import {
   statusDescription as catalogStatusDescription,
   statusLabel as catalogStatusLabel,
   statusTone as catalogStatusTone,
-} from "./status_catalog.js?v=3.4.2-folder-video-fixes";
+} from "./status_catalog.js?v=3.4.3-history-sync";
 
 export const BUILT_IN_REWARD_PRESETS = [
   {

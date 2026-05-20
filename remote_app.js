@@ -1,4 +1,4 @@
-import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.4.2-folder-video-fixes";
+import { DEFAULT_MACHINE_ID, SUPABASE_URL } from "./config.js?v=3.4.3-history-sync";
 import {
   createSignedVideoUrl,
   currentUser,
@@ -11,15 +11,15 @@ import {
   signOut,
   update,
   upsert,
-} from "./api.js?v=3.4.2-folder-video-fixes";
-import { createRemoteRealtime } from "./realtime.js?v=3.4.2-folder-video-fixes";
+} from "./api.js?v=3.4.3-history-sync";
+import { createRemoteRealtime } from "./realtime.js?v=3.4.3-history-sync";
 import {
   compareHistoryRuns,
   historyRunsForSnapshot,
   jobClientRequestId,
   normalizeHistorySort,
   realRunConfirmsJob,
-} from "./history_sync.js?v=3.4.2-folder-video-fixes";
+} from "./history_sync.js?v=3.4.3-history-sync";
 import {
   REWARD_FIELDS,
   TERRAIN_DEFAULT_VALUES,
@@ -58,7 +58,7 @@ import {
   videoArtifactForCheckpoint,
   videoStateForCheckpoint,
   videoStateForRun,
-} from "./core.js?v=3.4.2-folder-video-fixes";
+} from "./core.js?v=3.4.3-history-sync";
 
 const PHONE_MEDIA = window.matchMedia
   ? window.matchMedia("(max-width: 720px)")
@@ -66,8 +66,8 @@ const PHONE_MEDIA = window.matchMedia
 
 const TEXT_AUTOSAVE_DELAY_MS = 350;
 const THEME_KEY = "redrhex_to_go_theme";
-const CHILD_RELEASE_VERSION = "3.4.2";
-const CHILD_RELEASE_NAME = "Folder + Video Fixes";
+const CHILD_RELEASE_VERSION = "3.4.3";
+const CHILD_RELEASE_NAME = "History Sync Repair";
 const VIEW_IDS = ["train", "rewards", "terrain", "history", "connection", "dashboard"];
 const NOTIFICATION_EVENTS = [
   ["notify_training_converged", "Converged", "Reward improvement has flattened."],

@@ -222,6 +222,35 @@ test("checkpoint video selection does not fall back to a different checkpoint vi
   assert.equal(videoStateForRun({ ...run, latest_video: "/logs/other-run/videos/play/model_9_clip.mp4" }, []).state, "recordable");
 });
 
+test("video selection can match by explicit checkpoint iteration", () => {
+  const run = {
+    id: "run-a",
+    log_dir: "/logs/run-a",
+    latest_checkpoint: "/logs/run-a/model_9.pt",
+  };
+  const artifact = {
+    run_id: "run-a",
+    kind: "video",
+    local_path: "/logs/run-a/videos/play/rl-video-step-0.mp4",
+    storage_path: "runs/run-a/videos/rl-video-step-0.mp4",
+    checkpoint_iteration: 9,
+    created_at: "2026-05-17T00:00:00Z",
+  };
+  assert.equal(videoArtifactForCheckpoint(run, [artifact], run.latest_checkpoint), artifact);
+  assert.equal(videoStateForCheckpoint(run, [artifact], run.latest_checkpoint).state, "ready");
+});
+
+test("mother completed video without uploaded artifact shows uploading for latest checkpoint", () => {
+  const run = {
+    id: "run-a",
+    log_dir: "/logs/run-a",
+    latest_checkpoint: "/logs/run-a/model_9.pt",
+    latest_video: "/logs/run-a/videos/play/rl-video-step-0.mp4",
+    video_status: "completed",
+  };
+  assert.equal(videoStateForCheckpoint(run, [], run.latest_checkpoint).state, "uploading");
+});
+
 test("video checkpoint options hide deleted compacted checkpoints", () => {
   const run = {
     id: "run-a",

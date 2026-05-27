@@ -1,5 +1,5 @@
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js?v=3.4.3-history-sync";
-import { sessionStore } from "./api.js?v=3.4.3-history-sync";
+import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js?v=3.4.10-sync-health";
+import { sessionStore } from "./api.js?v=3.4.10-sync-health";
 
 const REALTIME_IMPORT_URL = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 const TABLES = ["runs", "jobs", "artifacts", "machines", "run_deletions"];
